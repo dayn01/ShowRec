@@ -503,7 +503,12 @@ async def refresh_profile(profile_id: int):
         reddit.get_trending_posts(limit_per_sub=6),
     )
     if not history:
-        logger.info(f"Prefetch[p{profile_id}]: no history yet")
+        # Clear any stale per-profile caches so an unlinked/empty profile shows nothing
+        empty = {"recommendations": [], "based_on": 0, "top_genres": []}
+        await database.cache_set(_pk(profile_id, "recommendations"), empty)
+        await database.cache_set(_pk(profile_id, "ai_picks"), {"picks": [], "taste_profile": ""})
+        await database.cache_set(_pk(profile_id, "upcoming"), {"episodes": []})
+        logger.info(f"Prefetch[p{profile_id}]: no history — cleared caches")
         return
 
     # Recommendations
