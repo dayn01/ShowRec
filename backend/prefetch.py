@@ -612,6 +612,39 @@ def _pk(profile_id: int, key: str) -> str:
     return f"p{profile_id}:{key}"
 
 
+async def sync_all_watch_states():
+    """
+    Lightweight, frequent sync: pull each profile's watched state from its linked
+    accounts (Jellyfin/Plex/Trakt) — no TMDB recommendation/AI rebuild. Keeps
+    Watched/Watching/"seen" state fresh cheaply between full refreshes.
+    Also caches seasons for any newly-watched shows so completeness is accurate.
+    """
+    logger.info("Light sync: refreshing watch state for all profiles...")
+    for pid in await database.all_profile_ids():
+        profile = await database.get_profile(pid)
+        if not profile:
+            continue
+        try:
+            await sync_watch_state(profile)
+            # Cache seasons for any newly-watched shows (so 'seen' detection works)
+            history = await _gather_history(pid)
+            tv_ids = [h["tmdb_id"] for h in history
+                      if h.get("tmdb_id") and h.get("media_type") == "tv"]
+            for tmdb_id in tv_ids:
+                cached = await database.get_show(tmdb_id)
+                if not cached:
+                    await _cache_show_seasons(tmdb_id, all_seasons=True)
+                else:
+                    # ensure each season is cached (cheap if already there)
+                    for s in cached.get("seasons", []):
+                        if not await database.get_season(tmdb_id, s["season_number"]):
+                            await _cache_show_seasons(tmdb_id, all_seasons=True)
+                            break
+        except Exception as e:
+            logger.warning(f"Light sync[p{pid}] failed: {e}")
+    logger.info("Light sync: done")
+
+
 async def refresh_all():
     """Build global trending once, then refresh every profile."""
     logger.info("=== Prefetch: full refresh ===")

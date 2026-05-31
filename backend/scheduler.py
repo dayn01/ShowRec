@@ -55,13 +55,20 @@ async def check_upcoming_episodes():
 def start():
     scheduler.add_job(check_upcoming_episodes, "cron", hour=8, minute=0, id="daily_episodes")
     scheduler.add_job(_full_refresh, "interval", hours=6, id="full_refresh")
+    scheduler.add_job(_light_sync, "interval", hours=1, id="light_sync")
     scheduler.start()
-    logger.info("Scheduler started — episode check at 08:00, full refresh every 6h")
+    logger.info("Scheduler started — episode check 08:00, light sync hourly, full refresh every 6h")
 
 
 def _full_refresh():
     import asyncio
     import prefetch
     asyncio.run(prefetch.refresh_all())
+
+
+def _light_sync():
+    import asyncio
+    import prefetch
+    asyncio.run(prefetch.sync_all_watch_states())
 
     log.info(f"Show DB refresh complete — updated {len(tv_ids)} shows")
