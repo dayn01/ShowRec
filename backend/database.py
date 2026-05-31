@@ -436,6 +436,26 @@ async def get_watch_state(profile_id: int) -> dict:
     return {"tmdb_ids": list(tmdb_ids), "seasons": seasons, "episodes": episodes}
 
 
+async def get_watched_library(profile_id: int) -> list[dict]:
+    """
+    Fully-watched items for the Watched page: movies + explicit show-level marks.
+    Returns [{tmdb_id, media_type('movie'|'tv'), title}], most-recent first.
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            """SELECT media_type, tmdb_id, title, MAX(watched_at) AS w
+               FROM watch_state
+               WHERE profile_id=? AND media_type IN ('movie','show')
+               GROUP BY media_type, tmdb_id
+               ORDER BY w DESC""", (profile_id,)
+        ) as cur:
+            rows = await cur.fetchall()
+    return [
+        {"tmdb_id": tid, "media_type": "movie" if mt == "movie" else "tv", "title": title or ""}
+        for mt, tid, title, _ in rows
+    ]
+
+
 async def get_watched_for_recommendations(profile_id: int) -> list[dict]:
     """
     Returns unique watched titles for the recommender, most-recent first.

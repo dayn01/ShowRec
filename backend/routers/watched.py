@@ -197,6 +197,36 @@ async def get_watch_sources(pid: int = Depends(get_profile_id)):
     return await database.get_watch_state_stats(pid)
 
 
+@router.get("/library")
+async def get_watched_library(pid: int = Depends(get_profile_id)):
+    """Fully-watched movies + shows, enriched with posters for the Watched page."""
+    import asyncio
+    from routers.details import _fetch_and_cache_show
+    rows = await database.get_watched_library(pid)
+
+    async def enrich(row):
+        tmdb_id, mt = row["tmdb_id"], row["media_type"]
+        cached = await database.get_show(tmdb_id)
+        if not cached:
+            try:
+                cached = await _fetch_and_cache_show(tmdb_id, mt)
+            except Exception:
+                cached = None
+        return {
+            "id": tmdb_id,
+            "media_type": mt,
+            "title": (cached and (cached.get("title") or cached.get("name"))) or row["title"] or "Unknown",
+            "poster_url": cached.get("poster_url") if cached else None,
+            "vote_average": cached.get("vote_average", 0) if cached else 0,
+            "overview": cached.get("overview", "") if cached else "",
+            "release_date": cached.get("release_date") if cached else None,
+            "first_air_date": cached.get("first_air_date") if cached else None,
+        }
+
+    items = await asyncio.gather(*[enrich(r) for r in rows])
+    return {"items": list(items)}
+
+
 # ── "Not interested" dismissals ───────────────────────────────────────────────
 
 class DismissItem(BaseModel):

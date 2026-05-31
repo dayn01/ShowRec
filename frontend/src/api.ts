@@ -162,6 +162,7 @@ export const api = {
   searchTitles: (query: string, type: "multi" | "tv" | "movie" = "multi") =>
     get<{ results: Recommendation[] }>(`/search?q=${encodeURIComponent(query)}&type=${type}`),
 
+  getWatchedLibrary: () => get<{ items: Recommendation[] }>(`/watched/library`),
   getWatchlist: () => get<{ items: Recommendation[] }>(`/watchlist`),
   getWatchlistIds: () => get<{ tmdb_ids: number[] }>(`/watchlist/ids`),
   addWatchlist: (item: Recommendation) =>

@@ -3,6 +3,7 @@ import { Routes, Route, NavLink, useLocation } from "react-router-dom";
 import Dashboard from "./pages/Dashboard";
 import Upcoming from "./pages/Upcoming";
 import Watching from "./pages/Watching";
+import Watched from "./pages/Watched";
 import Watchlist from "./pages/Watchlist";
 import Search from "./pages/Search";
 import StatusBar from "./components/StatusBar";
@@ -13,6 +14,7 @@ import { useIsMobile } from "./useIsMobile";
 const NAV = [
   { to: "/", label: "Recommendations", end: true },
   { to: "/watching", label: "Watching" },
+  { to: "/watched", label: "Watched" },
   { to: "/watchlist", label: "Watchlist" },
   { to: "/upcoming", label: "Upcoming" },
   { to: "/search", label: "🔍 Search" },
@@ -139,6 +141,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/watching" element={<Watching />} />
+          <Route path="/watched" element={<Watched />} />
           <Route path="/watchlist" element={<Watchlist />} />
           <Route path="/upcoming" element={<Upcoming />} />
           <Route path="/search" element={<Search />} />
