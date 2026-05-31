@@ -226,7 +226,20 @@ export default function Dashboard() {
   const [selected, setSelected] = useState<{ id: number; mediaType: string } | null>(null);
   const [genreFilter, setGenreFilter] = useState<string[]>([]);
   const [forYouType, setForYouType] = useState<"all" | "tv" | "movie">("all");
-  const [forYouMeta, setForYouMeta] = useState<{ top_genres?: string[]; based_on?: number; trakt_blended?: boolean } | null>(null);
+  const [forYouMeta, setForYouMeta] = useState<{ top_genres?: string[]; based_on?: number; trakt_blended?: boolean; ai_blended?: boolean } | null>(null);
+  const [aiEnabled, setAiEnabled] = useState(true);
+
+  useEffect(() => {
+    api.getStatus().then(s => setAiEnabled(!!s.ai_enabled)).catch(() => {});
+  }, []);
+
+  // Hide the Custom Search (AI) tab when no Anthropic key is configured
+  const visibleTabs = aiEnabled ? tabs : tabs.filter(t => t.id !== "custom");
+
+  // If AI gets disabled while on the custom tab, bounce to For You
+  useEffect(() => {
+    if (!aiEnabled && tab === "custom") setTab("for-you");
+  }, [aiEnabled, tab]);
 
   const forYou = usePaged(async (page) => {
     // Recommendations are a small ranked pool (~80) — load all at once so the
@@ -268,7 +281,7 @@ export default function Dashboard() {
     <div>
       {/* Main tabs */}
       <div style={{ display: "flex", gap: 8, marginBottom: 24, flexWrap: "wrap" }}>
-        {tabs.map(t => (
+        {visibleTabs.map(t => (
           <button key={t.id} onClick={() => { setTab(t.id); setGenreFilter([]); }} style={{
             padding: "7px 18px", borderRadius: 20, border: "1px solid var(--border)",
             background: tab === t.id ? "var(--accent)" : "var(--surface)",
@@ -290,7 +303,7 @@ export default function Dashboard() {
               {forYouMeta?.top_genres?.length ? (
                 <> · you tend to like <span style={{ color: "var(--accent2)" }}>{forYouMeta.top_genres.slice(0, 3).join(", ")}</span></>
               ) : null}
-              {forYouMeta?.trakt_blended ? " · ✨ AI + Trakt blended" : " · ✨ AI blended"}
+              {aiEnabled && (forYouMeta?.trakt_blended ? " · ✨ AI + Trakt blended" : " · ✨ AI blended")}
             </p>
           )}
 

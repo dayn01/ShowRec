@@ -59,6 +59,7 @@ export interface Status {
   home_assistant: boolean | null;
   trakt: boolean;
   tmdb: boolean;
+  ai_enabled: boolean;
 }
 
 export interface DetailedMedia {

@@ -13,6 +13,7 @@ async def get_status():
 
     trakt_configured = bool(settings.trakt_client_id and settings.trakt_access_token)
     tmdb_configured = bool(settings.tmdb_api_key)
+    ai_enabled = bool(settings.anthropic_api_key) and settings.anthropic_api_key != "your_anthropic_api_key_here"
 
     return {
         "jellyfin": jf_ok,
@@ -20,4 +21,5 @@ async def get_status():
         "home_assistant": ha_ok,
         "trakt": trakt_configured,
         "tmdb": tmdb_configured,
+        "ai_enabled": ai_enabled,
     }
