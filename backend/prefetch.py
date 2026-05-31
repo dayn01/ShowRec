@@ -223,11 +223,11 @@ async def _build_recommendations(history: list[dict], profile_id: int = 1) -> di
             2,
         )
 
-    # Keep up to 40 of each media type so the For You TV/Movies filters both
-    # have plenty, then merge back into one score-ranked list.
+    # Keep up to 75 of each media type so the For You TV/Movies filters both have
+    # plenty (and Load More has depth), then merge into one score-ranked list.
     ranked = sorted(scored.values(), key=lambda x: x["score"], reverse=True)
-    tv_items = [i for i in ranked if i.get("media_type") == "tv"][:40]
-    movie_items = [i for i in ranked if i.get("media_type") == "movie"][:40]
+    tv_items = [i for i in ranked if i.get("media_type") == "tv"][:75]
+    movie_items = [i for i in ranked if i.get("media_type") == "movie"][:75]
     results_sorted = sorted(tv_items + movie_items, key=lambda x: x["score"], reverse=True)
 
     # Strip internal scoring fields before caching

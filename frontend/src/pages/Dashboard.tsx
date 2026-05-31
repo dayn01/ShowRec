@@ -212,6 +212,7 @@ export default function Dashboard() {
   const [selected, setSelected] = useState<{ id: number; mediaType: string } | null>(null);
   const [genreFilter, setGenreFilter] = useState<string[]>([]);
   const [forYouType, setForYouType] = useState<"all" | "tv" | "movie">("all");
+  const [forYouVisible, setForYouVisible] = useState(24);  // client-side Load More
   const [forYouMeta, setForYouMeta] = useState<{ top_genres?: string[]; based_on?: number; trakt_blended?: boolean; ai_blended?: boolean } | null>(null);
   const [aiEnabled, setAiEnabled] = useState(true);
 
@@ -262,6 +263,13 @@ export default function Dashboard() {
     baseItems = baseItems.filter((i: any) => i.media_type === forYouType);
   }
   const filteredItems = applyGenreFilter(baseItems, genreFilter);
+
+  // For You paginates client-side (its whole pool is loaded at once)
+  const displayItems = tab === "for-you" ? filteredItems.slice(0, forYouVisible) : filteredItems;
+  const forYouHasMore = tab === "for-you" && filteredItems.length > forYouVisible;
+
+  // Reset the visible count when the For You filters change
+  useEffect(() => { setForYouVisible(24); }, [forYouType, genreFilter, tab]);
 
   return (
     <div>
@@ -329,15 +337,18 @@ export default function Dashboard() {
           )}
 
           <div className="media-grid">
-            {filteredItems.map((item: any) => (
+            {displayItems.map((item: any) => (
               <MediaCard key={item.id} item={item}
                 onClick={() => setSelected({ id: item.id, mediaType: item.media_type })} />
             ))}
           </div>
 
-          {/* Load More — trending only (For You loads its full pool at once) */}
+          {/* Load More — trending paginates from the server; For You reveals more locally */}
           {!active.loading && active.items.length > 0 && tab !== "for-you" && (
             <LoadMoreBtn loading={active.loadingMore} hasMore={active.hasMore} onClick={active.loadMore} />
+          )}
+          {tab === "for-you" && forYouHasMore && (
+            <LoadMoreBtn loading={false} hasMore={true} onClick={() => setForYouVisible(v => v + 24)} />
           )}
         </div>
       )}
