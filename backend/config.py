@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     class Config:
         env_file = str(ENV_FILE)
         env_file_encoding = "utf-8"
+        extra = "ignore"   # tolerate unrelated env vars (TUNNEL_TOKEN, COMPOSE_FILE, …)
 
 
 settings = Settings()
