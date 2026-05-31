@@ -239,8 +239,8 @@ export const api = {
       method: "DELETE",
       headers: { "X-Profile-Id": String(getProfileId()) },
     }).then(r => { if (!r.ok) throw new Error(r.statusText); return r.json(); }),
-  refreshProfile: (id: number) =>
-    fetch(`/api/profiles/${id}/refresh`, {
+  refreshProfile: (id: number, force = true) =>
+    fetch(`/api/profiles/${id}/refresh?force=${force}`, {
       method: "POST", headers: { "X-Profile-Id": String(getProfileId()) },
     }).then(r => r.json()),
 };

@@ -3,10 +3,13 @@ import { api, getProfileId, setProfileId, Profile } from "../api";
 
 const EMOJIS = ["🍿", "🎬", "📺", "🦸", "👽", "🧙", "🐱", "🌟", "🎮", "👤", "👩", "👨", "🧒"];
 
-function switchTo(id: number) {
+async function switchTo(id: number) {
   setProfileId(id);
   // Clear per-device watch caches so the new profile re-seeds cleanly
   ["wc_shows", "wc_episodes", "wc_progress", "wc_dismissed", "wc_watchlist"].forEach(k => localStorage.removeItem(k));
+  // Auto-refresh this profile if its data is stale (throttled — skips if fresh).
+  // Await the quick "started/fresh" response so the request isn't cancelled by reload.
+  try { await api.refreshProfile(id, false); } catch {}
   window.location.reload();
 }
 

@@ -1,6 +1,7 @@
 """Profile management."""
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+from deps import pkey
 import database
 
 router = APIRouter(prefix="/profiles", tags=["profiles"])
@@ -91,8 +92,16 @@ async def delete_profile(profile_id: int):
 
 
 @router.post("/{profile_id}/refresh")
-async def refresh_profile(profile_id: int):
-    """Rebuild this profile's watch state + recommendations in the background."""
+async def refresh_profile(profile_id: int, force: bool = True, max_age_minutes: int = 60):
+    """
+    Rebuild this profile's watch state + recommendations in the background.
+    force=False skips the rebuild if the profile's data is younger than
+    max_age_minutes (used for cheap auto-refresh on profile switch).
+    """
     import prefetch, asyncio
+    if not force:
+        age = await database.cache_age(pkey(profile_id, "recommendations"))
+        if age is not None and age < max_age_minutes * 60:
+            return {"status": "fresh", "age_seconds": age}
     asyncio.create_task(prefetch.refresh_profile(profile_id))
     return {"status": "refresh started"}
