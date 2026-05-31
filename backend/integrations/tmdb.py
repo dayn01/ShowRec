@@ -127,5 +127,35 @@ async def get_popular(media_type: str, pages: int = 5) -> list[dict]:
     return results
 
 
+async def discover(media_type: str, *, genres: list[int] = None, keywords: list[int] = None,
+                   people: list[int] = None, pages: int = 1) -> list[dict]:
+    """
+    TMDB Discover — generate candidates by taste dimensions.
+    media_type: 'tv' or 'movie'. Combine genres / keywords / people (OR within each).
+    """
+    results = []
+    base_params = {"sort_by": "popularity.desc", "vote_count.gte": 50}
+    if genres:
+        base_params["with_genres"] = "|".join(str(g) for g in genres)
+    if keywords:
+        base_params["with_keywords"] = "|".join(str(k) for k in keywords)
+    if people:
+        # cast for movies, with_people works for both
+        key = "with_cast" if media_type == "movie" else "with_people"
+        base_params[key] = "|".join(str(p) for p in people)
+
+    async with httpx.AsyncClient(timeout=20) as client:
+        for page in range(1, pages + 1):
+            try:
+                r = await client.get(f"{BASE}/discover/{media_type}",
+                                     params=_params(page=page, **base_params))
+                if r.status_code != 200:
+                    break
+                results.extend(r.json().get("results", []))
+            except Exception:
+                break
+    return results
+
+
 def poster_url(path: Optional[str]) -> Optional[str]:
     return f"{IMAGE_BASE}{path}" if path else None

@@ -27,38 +27,52 @@ GENRE_MAP = {
 
 
 async def _build_genre_affinity(watched: list[dict]) -> "Counter":
+    """Back-compat shim — returns just the genre Counter."""
+    profile = await _build_taste_profile(watched)
+    return profile["genres"]
+
+
+async def _build_taste_profile(watched: list[dict]) -> dict:
     """
-    Build a genre preference profile (name → weight) from the genres of watched
-    titles. Reads SQLite cache first; fetches+caches details for up to 40 uncached
-    titles (which also warms the cache for later prefetch steps).
+    Build a taste profile from watched titles' cached details:
+      - genres   (name → weight)
+      - keywords (id → weight)   themes/tropes
+      - people   (id → weight)   recurring cast
+    Fetches+caches details for up to 40 uncached titles (also warms the cache).
     """
     from collections import Counter
     from routers.details import _fetch_and_cache_show
-    affinity: Counter = Counter()
+    genres: Counter = Counter()
+    keywords: Counter = Counter()
+    people: Counter = Counter()
+
+    def absorb(data: dict):
+        for g in data.get("genres", []):
+            genres[g] += 1
+        for k in data.get("keyword_ids", []):
+            keywords[k] += 1
+        for p in data.get("cast_ids", []):
+            people[p] += 1
 
     uncached: list[dict] = []
     for h in watched:
         cached = await database.get_show(h["tmdb_id"])
         if cached and cached.get("genres"):
-            for g in cached["genres"]:
-                affinity[g] += 1
+            absorb(cached)
         else:
             uncached.append(h)
 
-    # Fetch a capped number of missing titles in parallel to flesh out the profile
-    async def fetch_genres(h):
+    async def fetch(h):
         try:
-            data = await _fetch_and_cache_show(h["tmdb_id"], h["media_type"])
-            return data.get("genres", [])
+            return await _fetch_and_cache_show(h["tmdb_id"], h["media_type"])
         except Exception:
-            return []
+            return None
 
-    fetched = await asyncio.gather(*[fetch_genres(h) for h in uncached[:40]])
-    for genres in fetched:
-        for g in genres:
-            affinity[g] += 1
+    for data in await asyncio.gather(*[fetch(h) for h in uncached[:40]]):
+        if data:
+            absorb(data)
 
-    return affinity
+    return {"genres": genres, "keywords": keywords, "people": people}
 
 
 async def _build_recommendations(history: list[dict], profile_id: int = 1) -> dict | None:
@@ -69,8 +83,11 @@ async def _build_recommendations(history: list[dict], profile_id: int = 1) -> di
 
     seen_ids = {tid for tid, _ in watched_ids}
     seen_ids |= set(await database.get_dismissed_ids(profile_id))  # exclude "not interested"
-    genre_affinity = await _build_genre_affinity(history)
+    taste = await _build_taste_profile(history)
+    genre_affinity = taste["genres"]
     max_genre = max(genre_affinity.values()) if genre_affinity else 1
+    top_keywords = [k for k, _ in taste["keywords"].most_common(8)]
+    top_people = [p for p, _ in taste["people"].most_common(6)]
 
     # Sample up to 25 watched items spread across the whole history (most-recent
     # first, but not ONLY recent) so picks reflect long-term taste.
@@ -157,13 +174,52 @@ async def _build_recommendations(history: list[dict], profile_id: int = 1) -> di
                     "_trakt": 8,
                 }
 
+    # ── Taste-based discovery: surface titles by the THEMES and PEOPLE you watch
+    #    most, not just "similar to specific shows". These broaden personalization.
+    top_genre_ids = []
+    name_to_id = {v: k for k, v in GENRE_MAP.items()}
+    for gname, _ in genre_affinity.most_common(3):
+        if gname in name_to_id:
+            top_genre_ids.append(name_to_id[gname])
+
+    async def discover_into(media_type, **kwargs):
+        try:
+            return await tmdb.discover(media_type, pages=1, **kwargs)
+        except Exception:
+            return []
+
+    discover_tasks = []
+    for mt in ("tv", "movie"):
+        if top_keywords:
+            discover_tasks.append((mt, "keyword", discover_into(mt, keywords=top_keywords, genres=top_genre_ids)))
+        if top_people:
+            discover_tasks.append((mt, "people", discover_into(mt, people=top_people)))
+
+    for mt, kind, task in discover_tasks:
+        for item in await task:
+            iid = item.get("id")
+            if not iid or iid in seen_ids:
+                continue
+            taste_boost = 6 if kind == "people" else 4   # "more from actors you love" ranks high
+            if iid in scored:
+                scored[iid]["_taste"] = max(scored[iid].get("_taste", 0), taste_boost)
+            else:
+                scored[iid] = {
+                    **item,
+                    "media_type": mt,
+                    "poster_url": tmdb.poster_url(item.get("poster_path")),
+                    "_quality": item.get("vote_average", 0) or 0,
+                    "_genre": 0, "_freq": 0, "_trakt": 0, "_taste": taste_boost,
+                }
+
     # Final weighted score
     for item in scored.values():
         item["score"] = round(
-            item["_freq"] * 3.0       # how often recommended across your library
-            + item["_genre"]          # genre affinity match
-            + item["_quality"] * 0.8  # overall quality
-            + item["_trakt"],         # Trakt personal endorsement
+            item["_freq"] * 3.0          # how often recommended across your library
+            + item["_genre"]             # genre affinity match
+            + item.get("_taste", 0)      # theme/actor taste match (discover)
+            + item["_quality"] * 0.8     # overall quality
+            + item["_trakt"],            # Trakt personal endorsement
             2,
         )
 
@@ -176,7 +232,7 @@ async def _build_recommendations(history: list[dict], profile_id: int = 1) -> di
 
     # Strip internal scoring fields before caching
     for item in results_sorted:
-        for k in ("_quality", "_genre", "_freq", "_trakt"):
+        for k in ("_quality", "_genre", "_freq", "_trakt", "_taste"):
             item.pop(k, None)
 
     top_genres = [g for g, _ in genre_affinity.most_common(5)]

@@ -23,6 +23,13 @@ def _shape_show(data: dict, media_type: str) -> dict:
         "vote_average": data.get("vote_average"),
         "vote_count": data.get("vote_count"),
         "genres": [g["name"] for g in data.get("genres", [])],
+        "genre_ids": [g["id"] for g in data.get("genres", [])],
+        # Taste signals used by the recommender
+        "cast_ids": [c["id"] for c in data.get("credits", {}).get("cast", [])[:8] if c.get("id")],
+        "keyword_ids": [
+            k["id"] for k in (data.get("keywords", {}).get("keywords")
+                              or data.get("keywords", {}).get("results") or [])
+        ],
         "media_type": media_type,
         "status": data.get("status"),
         "homepage": data.get("homepage"),
