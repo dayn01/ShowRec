@@ -82,6 +82,12 @@ async def debug_upcoming():
 
 @router.post("/notify-now")
 async def trigger_notification():
-    """Manually trigger the Home Assistant episode notification."""
+    """Manually trigger the Home Assistant episode notification (only sends if episodes air today)."""
     await check_upcoming_episodes()
-    return {"status": "notification sent"}
+    return {"status": "checked — sent only if episodes air today"}
+
+
+@router.post("/test-notify")
+async def test_notify():
+    """Send a test HA notification immediately (bypasses the airing-today check)."""
+    return await homeassistant.send_test()
