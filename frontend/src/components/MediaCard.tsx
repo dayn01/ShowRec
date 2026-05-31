@@ -83,13 +83,13 @@ export default function MediaCard({ item, onClick }: { item: Recommendation; onC
         }}>
           {score > 0 ? `${score}%` : "N/A"}
         </div>
-        {/* Not interested — appears on hover */}
+        {/* Not interested — under the score badge, appears on hover */}
         <button
           onClick={notInterested}
           title="Not interested — hide this"
           className="dismiss-btn"
           style={{
-            position: "absolute", top: 8, right: 50,
+            position: "absolute", top: 38, right: 8,
             background: "rgba(0,0,0,0.75)", border: "none", borderRadius: "50%",
             width: 24, height: 24, cursor: "pointer", color: "#fff",
             fontSize: 14, lineHeight: "24px", textAlign: "center", padding: 0,
