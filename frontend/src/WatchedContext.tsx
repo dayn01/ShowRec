@@ -15,6 +15,7 @@ interface WatchedContextType {
   isWatched: (tmdbId: number) => boolean;
   markWatched: (tmdbId: number) => void;
   markUnwatched: (tmdbId: number) => void;
+  markShowComplete: (tmdbId: number, seasons: { season_number: number; total: number; watched: number[] }[]) => void;
   showProgress: (tmdbId: number) => "none" | "partial" | "full";
   partiallyWatchedIds: number[];
 
@@ -42,7 +43,7 @@ interface WatchedContextType {
 }
 
 const WatchedContext = createContext<WatchedContextType>({
-  isWatched: () => false, markWatched: () => {}, markUnwatched: () => {},
+  isWatched: () => false, markWatched: () => {}, markUnwatched: () => {}, markShowComplete: () => {},
   showProgress: () => "none", partiallyWatchedIds: [],
   initSeasonTotals: () => {}, updateSeasonTotal: () => {},
   isSeasonWatched: () => false, seasonProgress: () => null,
@@ -147,7 +148,39 @@ export function WatchedProvider({ children }: { children: ReactNode }) {
   // ── Shows ──────────────────────────────────────────────────────────────────
   const isWatched = useCallback((id: number) => watchedShows.has(String(id)), [watchedShows]);
   const markWatched = useCallback((id: number) => setWatchedShows(p => new Set([...p, String(id)])), []);
-  const markUnwatched = useCallback((id: number) => setWatchedShows(p => { const s = new Set(p); s.delete(String(id)); return s; }), []);
+
+  const markUnwatched = useCallback((id: number) => {
+    setWatchedShows(p => { const s = new Set(p); s.delete(String(id)); return s; });
+    // Also clear any season progress + episode marks for this show (clean undo)
+    setWatchedEpisodes(p => {
+      const s = new Set([...p].filter(k => !k.startsWith(`${id}_`)));
+      return s;
+    });
+    setProgressMap(p => {
+      const m = new Map([...p].filter(([k]) => !k.startsWith(`${id}_`)));
+      return m;
+    });
+  }, []);
+
+  // Mark a whole show complete: show flag + every season's progress + episode keys.
+  // seasons: [{ season_number, total, watched: number[] }]
+  const markShowComplete = useCallback((tmdbId: number, seasons: { season_number: number; total: number; watched: number[] }[]) => {
+    setWatchedShows(p => new Set([...p, String(tmdbId)]));
+    setProgressMap(p => {
+      const m = new Map(p);
+      for (const s of seasons) {
+        m.set(sKey(tmdbId, s.season_number), { watched: s.watched.length, total: s.total || s.watched.length });
+      }
+      return m;
+    });
+    setWatchedEpisodes(p => {
+      const set = new Set(p);
+      for (const s of seasons) {
+        for (const ep of s.watched) set.add(epKey(tmdbId, s.season_number, ep));
+      }
+      return set;
+    });
+  }, []);
 
   const showProgress = useCallback((tmdbId: number): "none" | "partial" | "full" => {
     if (watchedShows.has(String(tmdbId))) return "full";
@@ -323,7 +356,7 @@ export function WatchedProvider({ children }: { children: ReactNode }) {
 
   return (
     <WatchedContext.Provider value={{
-      isWatched, markWatched, markUnwatched, showProgress, partiallyWatchedIds,
+      isWatched, markWatched, markUnwatched, markShowComplete, showProgress, partiallyWatchedIds,
       initSeasonTotals, updateSeasonTotal,
       isSeasonWatched, seasonProgress, markSeasonWatched, markSeasonUnwatched,
       isEpisodeWatched, markEpisodeWatched, markEpisodeUnwatched,

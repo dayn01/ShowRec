@@ -15,7 +15,7 @@ export default function AiPickCard({ item, onClick }: Props) {
   const score = Math.round(item.vote_average * 10);
   const scoreColor = score >= 75 ? "var(--green)" : score >= 55 ? "var(--yellow)" : "var(--red)";
 
-  const { isWatched, markWatched, markUnwatched } = useWatched();
+  const { isWatched, markWatched, markUnwatched, markShowComplete } = useWatched();
   const watched = isWatched(item.id);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
@@ -29,8 +29,9 @@ export default function AiPickCard({ item, onClick }: Props) {
         await api.markUnwatched(item.id, item.media_type, title);
         markUnwatched(item.id);
       } else {
-        await api.markWatched(item.id, item.media_type, title, parseInt(year) || undefined);
-        markWatched(item.id);
+        const res: any = await api.markWatched(item.id, item.media_type, title, parseInt(year) || undefined);
+        if (item.media_type === "tv" && res?.seasons) markShowComplete(item.id, res.seasons);
+        else markWatched(item.id);
       }
     } catch {
       setError(true);

@@ -64,7 +64,7 @@ export default function DetailModal({ tmdbId, mediaType, onClose }: Props) {
     return () => { document.body.style.overflow = ""; };
   }, []);
 
-  const { isWatched, markWatched, markUnwatched, initSeasonTotals,
+  const { isWatched, markWatched, markUnwatched, markShowComplete, initSeasonTotals,
           isWatchlisted, toggleWatchlist, dismiss } = useWatched();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
@@ -101,8 +101,9 @@ export default function DetailModal({ tmdbId, mediaType, onClose }: Props) {
         await api.markUnwatched(data.id, data.media_type, data.title);
         markUnwatched(data.id);
       } else {
-        await api.markWatched(data.id, data.media_type, data.title, year);
-        markWatched(data.id);
+        const res: any = await api.markWatched(data.id, data.media_type, data.title, year);
+        if (data.media_type === "tv" && res?.seasons) markShowComplete(data.id, res.seasons);
+        else markWatched(data.id);
       }
     } catch {
       setError(true);

@@ -5,7 +5,7 @@ If a Trakt token is configured, changes are also synced to Trakt (best-effort).
 """
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
 import httpx
 import logging
 from config import settings
@@ -73,16 +73,47 @@ class WatchedEpisode(BaseModel):
 
 @router.post("")
 async def mark_watched(item: WatchedItem, pid: int = Depends(get_profile_id)):
-    mt = "movie" if item.media_type == "movie" else "show"
-    await database.mark_watched(pid, mt, item.tmdb_id, title=item.title, source="user")
-
     watched_at = item.watched_at or datetime.now(timezone.utc).isoformat()
-    key = "movies" if mt == "movie" else "shows"
+
+    # Movie — simple single row
+    if item.media_type == "movie":
+        await database.mark_watched(pid, "movie", item.tmdb_id, title=item.title, source="user")
+        await _trakt_sync("history", {
+            "movies": [{"title": item.title, "year": item.year,
+                        "watched_at": watched_at, "ids": {"tmdb": item.tmdb_id}}]
+        })
+        return {"status": "marked as watched", "store": "sqlite"}
+
+    # TV show — mark the show AND every aired episode of every season
+    await database.mark_watched(pid, "show", item.tmdb_id, title=item.title, source="user")
+
+    today = date.today().isoformat()
+    marked_seasons = []
+    try:
+        from routers.details import _fetch_and_cache_show, _fetch_and_cache_season
+        show = await database.get_show(item.tmdb_id) or await _fetch_and_cache_show(item.tmdb_id, "tv")
+        for s in show.get("seasons", []):
+            sn = s.get("season_number")
+            if sn is None or sn < 1:
+                continue
+            season_data = await database.get_season(item.tmdb_id, sn) or await _fetch_and_cache_season(item.tmdb_id, sn)
+            total = len(season_data.get("episodes", []))
+            aired = [
+                ep["episode_number"] for ep in season_data.get("episodes", [])
+                if not ep.get("air_date") or ep["air_date"] <= today
+            ]
+            if aired:
+                await database.mark_episodes_bulk(pid, item.tmdb_id, sn, aired, title=item.title, source="user")
+            marked_seasons.append({"season_number": sn, "total": total, "watched": aired})
+    except Exception as e:
+        logger.warning(f"mark show {item.tmdb_id}: episode marking failed: {e}")
+
+    # Trakt — mark the whole show
     await _trakt_sync("history", {
-        key: [{"title": item.title, "year": item.year,
-               "watched_at": watched_at, "ids": {"tmdb": item.tmdb_id}}]
+        "shows": [{"title": item.title, "year": item.year,
+                   "watched_at": watched_at, "ids": {"tmdb": item.tmdb_id}}]
     })
-    return {"status": "marked as watched", "store": "sqlite"}
+    return {"status": "marked as watched", "store": "sqlite", "seasons": marked_seasons}
 
 
 @router.delete("")
