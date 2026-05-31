@@ -413,27 +413,73 @@ async def get_watch_state(profile_id: int) -> dict:
         ) as cur:
             rows = await cur.fetchall()
 
-    # tmdb_ids = FULLY-watched items only (movies + explicit show-level marks).
-    # Shows that merely have watched episodes go into episodes/seasons so the
-    # frontend can compute partial-vs-complete progress itself.
-    tmdb_ids: set[int] = set()
-    episodes = []
-    season_counts: dict[tuple[int, int], int] = {}
+        # tmdb_ids = FULLY-watched items (movies + explicit show-level marks).
+        tmdb_ids: set[int] = set()
+        episodes = []
+        season_counts: dict[tuple[int, int], int] = {}
+        watched_by_show: dict[int, set] = {}
 
-    for media_type, tmdb_id, season, episode in rows:
-        if media_type in ("movie", "show"):
-            tmdb_ids.add(tmdb_id)
-        elif media_type == "episode":
-            episodes.append({"tmdb_id": tmdb_id, "season": season, "episode": episode})
-            key = (tmdb_id, season)
-            season_counts[key] = season_counts.get(key, 0) + 1
+        for media_type, tmdb_id, season, episode in rows:
+            if media_type in ("movie", "show"):
+                tmdb_ids.add(tmdb_id)
+            elif media_type == "episode":
+                episodes.append({"tmdb_id": tmdb_id, "season": season, "episode": episode})
+                season_counts[(tmdb_id, season)] = season_counts.get((tmdb_id, season), 0) + 1
+                watched_by_show.setdefault(tmdb_id, set()).add((season, episode))
 
-    seasons = [
-        {"tmdb_id": tid, "season": sn, "episodes_watched": cnt}
-        for (tid, sn), cnt in season_counts.items()
-    ]
+        seasons = [
+            {"tmdb_id": tid, "season": sn, "episodes_watched": cnt}
+            for (tid, sn), cnt in season_counts.items()
+        ]
 
-    return {"tmdb_ids": list(tmdb_ids), "seasons": seasons, "episodes": episodes}
+        # Bulk-load cached show + season data (same connection) to detect
+        # which shows are fully watched (all AIRED episodes seen).
+        check_ids = [t for t in watched_by_show if t not in tmdb_ids]
+        shows_cache: dict[int, dict] = {}
+        seasons_cache: dict[tuple[int, int], dict] = {}
+        if check_ids:
+            qmarks = ",".join("?" * len(check_ids))
+            async with db.execute(f"SELECT tmdb_id, data FROM shows WHERE tmdb_id IN ({qmarks})", check_ids) as cur:
+                for tid, data in await cur.fetchall():
+                    shows_cache[tid] = json.loads(data)
+            async with db.execute(f"SELECT tmdb_id, season_number, data FROM seasons WHERE tmdb_id IN ({qmarks})", check_ids) as cur:
+                for tid, sn, data in await cur.fetchall():
+                    seasons_cache[(tid, sn)] = json.loads(data)
+
+    today = time.strftime("%Y-%m-%d")
+    complete_ids: list[int] = []
+    for tmdb_id in check_ids:
+        show = shows_cache.get(tmdb_id)
+        if not show or not show.get("seasons"):
+            continue
+        watched_set = watched_by_show[tmdb_id]
+        all_aired_seen, saw_any_aired = True, False
+        for s in show["seasons"]:
+            sn = s.get("season_number")
+            if sn is None or sn < 1:
+                continue
+            season_data = seasons_cache.get((tmdb_id, sn))
+            if not season_data:
+                all_aired_seen = False  # unknown season — can't confirm
+                break
+            for e in season_data.get("episodes", []):
+                ad = e.get("air_date")
+                if ad and ad <= today:
+                    saw_any_aired = True
+                    if (sn, e["episode_number"]) not in watched_set:
+                        all_aired_seen = False
+                        break
+            if not all_aired_seen:
+                break
+        if all_aired_seen and saw_any_aired:
+            complete_ids.append(tmdb_id)
+
+    return {
+        "tmdb_ids": list(tmdb_ids),
+        "complete_tmdb_ids": complete_ids,
+        "seasons": seasons,
+        "episodes": episodes,
+    }
 
 
 async def get_watched_library(profile_id: int) -> list[dict]:

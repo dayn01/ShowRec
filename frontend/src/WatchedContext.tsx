@@ -114,8 +114,10 @@ export function WatchedProvider({ children }: { children: ReactNode }) {
       .then(data => {
         if (!data) return;
 
-        if (data.tmdb_ids?.length) {
-          setWatchedShows(prev => new Set([...prev, ...data.tmdb_ids.map(String)]));
+        // Fully-watched items: explicit marks + shows the backend detected as complete
+        const fullIds = [...(data.tmdb_ids ?? []), ...(data.complete_tmdb_ids ?? [])];
+        if (fullIds.length) {
+          setWatchedShows(prev => new Set([...prev, ...fullIds.map(String)]));
         }
 
         if (data.episodes?.length) {
