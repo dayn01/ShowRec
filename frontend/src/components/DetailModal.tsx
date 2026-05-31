@@ -64,9 +64,28 @@ export default function DetailModal({ tmdbId, mediaType, onClose }: Props) {
     return () => { document.body.style.overflow = ""; };
   }, []);
 
-  const { isWatched, markWatched, markUnwatched, initSeasonTotals } = useWatched();
+  const { isWatched, markWatched, markUnwatched, initSeasonTotals,
+          isWatchlisted, toggleWatchlist, dismiss } = useWatched();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
+
+  const onWatchlist = data ? isWatchlisted(data.id) : false;
+
+  function watchlistToggle() {
+    if (!data) return;
+    toggleWatchlist({
+      id: data.id, media_type: data.media_type,
+      title: data.title, poster_url: data.poster_url,
+      vote_average: data.vote_average, overview: data.overview,
+      release_date: data.release_date, first_air_date: data.first_air_date,
+    });
+  }
+
+  function notInterested() {
+    if (!data) return;
+    dismiss(data.id, data.media_type, data.title);
+    onClose();  // hide it and close the modal
+  }
 
   const score = data ? Math.round(data.vote_average * 10) : 0;
   const scoreColor = score >= 75 ? "var(--green)" : score >= 55 ? "var(--yellow)" : "var(--red)";
@@ -159,27 +178,49 @@ export default function DetailModal({ tmdbId, mediaType, onClose }: Props) {
                   <span style={{ fontWeight: 700, fontSize: 18, color: scoreColor }}>{score > 0 ? `${score}%` : "N/A"}</span>
                 </div>
 
-                <button
-                  onClick={toggleWatched}
-                  disabled={loading}
-                  style={{
-                    marginTop: 12,
-                    padding: "8px 20px",
-                    borderRadius: 20,
-                    border: "none",
-                    cursor: loading ? "wait" : "pointer",
-                    fontWeight: 600,
-                    fontSize: 13,
-                    background: error ? "var(--red)" : data && isWatched(data.id) ? "var(--green)" : "var(--accent)",
-                    color: data && isWatched(data.id) ? "#000" : "#fff",
-                    transition: "background 0.2s",
-                  }}
-                >
-                  {loading ? "Saving…"
-                    : error ? "Error — try again"
-                    : data && isWatched(data.id) ? "✓ Marked as Seen (undo)"
-                    : "Mark as Seen"}
-                </button>
+                <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+                  <button
+                    onClick={toggleWatched}
+                    disabled={loading}
+                    style={{
+                      padding: "8px 18px", borderRadius: 20, border: "none",
+                      cursor: loading ? "wait" : "pointer", fontWeight: 600, fontSize: 13,
+                      background: error ? "var(--red)" : data && isWatched(data.id) ? "var(--green)" : "var(--accent)",
+                      color: data && isWatched(data.id) ? "#000" : "#fff",
+                      transition: "background 0.2s",
+                    }}
+                  >
+                    {loading ? "Saving…"
+                      : error ? "Error — try again"
+                      : data && isWatched(data.id) ? "✓ Seen (undo)"
+                      : "Mark as Seen"}
+                  </button>
+
+                  <button
+                    onClick={watchlistToggle}
+                    style={{
+                      padding: "8px 16px", borderRadius: 20,
+                      border: "1px solid var(--border)", cursor: "pointer", fontWeight: 600, fontSize: 13,
+                      background: onWatchlist ? "var(--accent)" : "var(--surface2)",
+                      color: onWatchlist ? "#fff" : "var(--text)",
+                      transition: "background 0.2s",
+                    }}
+                  >
+                    {onWatchlist ? "✓ On Watchlist" : "+ Watchlist"}
+                  </button>
+
+                  <button
+                    onClick={notInterested}
+                    title="Not interested — hide this"
+                    style={{
+                      padding: "8px 16px", borderRadius: 20,
+                      border: "1px solid var(--border)", cursor: "pointer", fontWeight: 600, fontSize: 13,
+                      background: "var(--surface2)", color: "var(--muted)",
+                    }}
+                  >
+                    ✕ Not Interested
+                  </button>
+                </div>
 
                 {data.tagline && (
                   <div style={{ color: "var(--muted)", fontStyle: "italic", fontSize: 13, marginTop: 4 }}>{data.tagline}</div>
