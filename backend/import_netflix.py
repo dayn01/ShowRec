@@ -173,5 +173,10 @@ if __name__ == "__main__":
         print("Usage: python import_netflix.py <csv_path> [profile_id]")
         sys.exit(1)
     path = sys.argv[1]
-    pid = int(sys.argv[2]) if len(sys.argv) > 2 else 1
-    asyncio.run(main(path, pid))
+    pid_arg = sys.argv[2].strip() if len(sys.argv) > 2 else "1"
+    if not pid_arg.isdigit():
+        print(f"Profile id must be a number, got '{pid_arg}'.")
+        print("Tip: run this command on its own line, e.g.:")
+        print("  python import_netflix.py /data/netflix.csv 1")
+        sys.exit(1)
+    asyncio.run(main(path, int(pid_arg)))
