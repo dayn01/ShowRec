@@ -1,0 +1,23 @@
+# Optional override: give the frontend its OWN IP + hostname on your LAN so the
+# router registers it like a real device (then you can reach http://showrec).
+#
+#   1. Edit the subnet/gateway/parent to match your network (see DOCKER.md).
+#   2. Pick a free static IP on your LAN for `ipv4_address`.
+#   3. Run:  docker compose -f docker-compose.yml -f docker-compose.macvlan.yml up -d --build
+#
+services:
+  frontend:
+    networks:
+      lan:
+        ipv4_address: 192.168.1.50   # <-- a free IP on your LAN
+    ports: []                         # not needed on macvlan (own IP)
+
+networks:
+  lan:
+    driver: macvlan
+    driver_opts:
+      parent: eth0                    # <-- your server's LAN interface (ip a)
+    ipam:
+      config:
+        - subnet: 192.168.1.0/24      # <-- your LAN subnet
+          gateway: 192.168.1.1        # <-- your router IP

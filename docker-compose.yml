@@ -1,0 +1,32 @@
+services:
+  backend:
+    build: ./backend
+    container_name: showrec-backend
+    restart: unless-stopped
+    environment:
+      - DB_PATH=/data/showrec_cache.db
+    env_file:
+      - ./.env
+    volumes:
+      - ./data:/data           # SQLite cache + watch state (survives restarts)
+      - ./.env:/app/.env:ro    # API keys / server URLs
+    expose:
+      - "8000"
+    networks:
+      - showrec
+
+  frontend:
+    build: ./frontend
+    container_name: showrec
+    hostname: showrec
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "8087:80"              # → http://<server-ip>:8087
+    networks:
+      - showrec
+
+networks:
+  showrec:
+    driver: bridge

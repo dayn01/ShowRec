@@ -1,0 +1,175 @@
+import { useState } from "react";
+import { Recommendation, api } from "../api";
+import { useWatched } from "../WatchedContext";
+
+const PLACEHOLDER = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='300' viewBox='0 0 200 300'%3E%3Crect width='200' height='300' fill='%231a1a24'/%3E%3Ctext x='100' y='155' text-anchor='middle' fill='%234444aa' font-size='14' font-family='sans-serif'%3ENo Image%3C/text%3E%3C/svg%3E";
+
+export default function MediaCard({ item, onClick }: { item: Recommendation; onClick: () => void }) {
+  const title = item.title || item.name || "Unknown";
+  const year = (item.release_date || item.first_air_date || "").slice(0, 4);
+  const score = Math.round(item.vote_average * 10);
+  const scoreColor = score >= 75 ? "var(--green)" : score >= 55 ? "var(--yellow)" : "var(--red)";
+
+  const { isWatched, markWatched, markUnwatched, showProgress, dismiss, isWatchlisted, toggleWatchlist } = useWatched();
+  const watched = isWatched(item.id);
+  const onWatchlist = isWatchlisted(item.id);
+
+  function notInterested(e: React.MouseEvent) {
+    e.stopPropagation();
+    dismiss(item.id, item.media_type, title);
+  }
+
+  function watchlistClick(e: React.MouseEvent) {
+    e.stopPropagation();
+    toggleWatchlist(item);
+  }
+  const progress = item.media_type === "tv" ? showProgress(item.id) : (watched ? "full" : "none");
+  const borderColor = progress === "full" ? "var(--green)" : progress === "partial" ? "var(--yellow)" : "var(--border)";
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(false);
+
+  async function toggleSeen(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (loading) return;
+    setLoading(true);
+    try {
+      if (watched) {
+        await api.markUnwatched(item.id, item.media_type, title);
+        markUnwatched(item.id);
+      } else {
+        await api.markWatched(item.id, item.media_type, title, parseInt(year) || undefined);
+        markWatched(item.id);
+      }
+    } catch {
+      setError(true);
+      setTimeout(() => setError(false), 2500);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div onClick={onClick} style={{
+      background: "var(--surface)",
+      border: `1px solid ${borderColor}`,
+      borderRadius: 12,
+      overflow: "hidden",
+      display: "flex",
+      flexDirection: "column",
+      transition: "transform 0.15s, box-shadow 0.15s",
+      cursor: "pointer",
+    }}
+      onMouseEnter={e => {
+        (e.currentTarget as HTMLElement).style.transform = "translateY(-4px)";
+        (e.currentTarget as HTMLElement).style.boxShadow = "0 8px 32px rgba(124,106,247,0.2)";
+      }}
+      onMouseLeave={e => {
+        (e.currentTarget as HTMLElement).style.transform = "";
+        (e.currentTarget as HTMLElement).style.boxShadow = "";
+      }}
+    >
+      <div style={{ position: "relative", aspectRatio: "2/3", overflow: "hidden" }}>
+        <img
+          src={item.poster_url || PLACEHOLDER}
+          alt={title}
+          style={{ width: "100%", height: "100%", objectFit: "cover" }}
+          onError={e => { (e.target as HTMLImageElement).src = PLACEHOLDER; }}
+        />
+        <div style={{
+          position: "absolute", top: 8, right: 8,
+          background: "rgba(0,0,0,0.75)", borderRadius: 20,
+          padding: "2px 8px", fontSize: 12, fontWeight: 700, color: scoreColor,
+        }}>
+          {score > 0 ? `${score}%` : "N/A"}
+        </div>
+        {/* Not interested — appears on hover */}
+        <button
+          onClick={notInterested}
+          title="Not interested — hide this"
+          className="dismiss-btn"
+          style={{
+            position: "absolute", top: 8, right: 50,
+            background: "rgba(0,0,0,0.75)", border: "none", borderRadius: "50%",
+            width: 24, height: 24, cursor: "pointer", color: "#fff",
+            fontSize: 14, lineHeight: "24px", textAlign: "center", padding: 0,
+          }}
+        >✕</button>
+        {/* Watchlist toggle — always visible when saved, on hover otherwise */}
+        <button
+          onClick={watchlistClick}
+          title={onWatchlist ? "Remove from watchlist" : "Add to watchlist"}
+          className={onWatchlist ? "" : "dismiss-btn"}
+          style={{
+            position: "absolute", top: 38, right: 8,
+            background: onWatchlist ? "var(--accent)" : "rgba(0,0,0,0.75)",
+            border: "none", borderRadius: "50%",
+            width: 24, height: 24, cursor: "pointer", color: "#fff",
+            fontSize: 13, lineHeight: "24px", textAlign: "center", padding: 0,
+          }}
+        >{onWatchlist ? "✓" : "+"}</button>
+        <div style={{
+          position: "absolute", top: 8, left: 8,
+          background: "var(--accent)", borderRadius: 20,
+          padding: "2px 8px", fontSize: 11, fontWeight: 600, color: "#fff",
+          textTransform: "uppercase", letterSpacing: 0.5,
+        }}>
+          {item.media_type === "tv" ? "TV" : "Film"}
+        </div>
+        {item.ai_endorsed && (
+          <div style={{
+            position: "absolute", top: 34, left: 8,
+            background: "rgba(124,106,247,0.9)", borderRadius: 20,
+            padding: "2px 8px", fontSize: 10, fontWeight: 700, color: "#fff",
+          }}>✨ AI Pick</div>
+        )}
+
+        <div style={{
+          position: "absolute", bottom: 0, left: 0, right: 0,
+          background: "linear-gradient(transparent, rgba(0,0,0,0.85))",
+          padding: "20px 8px 8px",
+          display: "flex", justifyContent: "center",
+          opacity: watched ? 1 : undefined,
+        }}
+          className="seen-overlay"
+        >
+          <button
+            onClick={toggleSeen}
+            disabled={loading}
+            style={{
+              padding: "5px 14px", borderRadius: 20, border: "none",
+              fontSize: 12, fontWeight: 600, cursor: "pointer",
+              background: error ? "var(--red)" : watched ? "var(--green)" : progress === "partial" ? "var(--yellow)" : "rgba(255,255,255,0.15)",
+              color: (watched || progress === "partial") ? "#000" : "#fff",
+              backdropFilter: "blur(4px)",
+              transition: "background 0.2s",
+            }}
+          >
+            {loading ? "…" : error ? "Error" : watched ? "✓ Seen" : progress === "partial" ? "▶ Watching" : "Mark Seen"}
+          </button>
+        </div>
+      </div>
+
+      <div style={{ padding: "12px 14px", flex: 1, display: "flex", flexDirection: "column", gap: 4 }}>
+        <div style={{ fontWeight: 600, fontSize: 14, lineHeight: 1.3 }}>{title}</div>
+        {year && <div style={{ fontSize: 12, color: "var(--muted)" }}>{year}</div>}
+        {item.reason ? (
+          <div className="card-blurb" style={{
+            fontSize: 12, color: "var(--text)", marginTop: 4, lineHeight: 1.4,
+            borderLeft: "2px solid var(--accent)", paddingLeft: 8,
+            display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden",
+          }}>
+            <span style={{ color: "var(--accent2)" }}>✨ </span>{item.reason}
+          </div>
+        ) : (
+          <div className="card-blurb" style={{
+            fontSize: 12, color: "var(--muted)", marginTop: 4,
+            display: "-webkit-box", WebkitLineClamp: 3,
+            WebkitBoxOrient: "vertical", overflow: "hidden",
+          }}>
+            {item.overview || "No description available."}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

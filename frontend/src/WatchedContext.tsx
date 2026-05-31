@@ -1,0 +1,338 @@
+import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from "react";
+import { getProfileId } from "./api";
+
+const pidHeaders = () => ({ "Content-Type": "application/json", "X-Profile-Id": String(getProfileId()) });
+
+const epKey = (tmdbId: number, season: number, episode: number) => `${tmdbId}_${season}_${episode}`;
+const sKey = (tmdbId: number, season: number) => `${tmdbId}_${season}`;
+
+export interface SeasonProgress {
+  watched: number;  // episodes watched (from Trakt/user actions)
+  total: number;    // TMDB episode count (source of truth — 0 = not yet known)
+}
+
+interface WatchedContextType {
+  isWatched: (tmdbId: number) => boolean;
+  markWatched: (tmdbId: number) => void;
+  markUnwatched: (tmdbId: number) => void;
+  showProgress: (tmdbId: number) => "none" | "partial" | "full";
+  partiallyWatchedIds: number[];
+
+  // Called when show detail opens — seeds TMDB totals for all seasons at once
+  initSeasonTotals: (tmdbId: number, seasons: { season_number: number; episode_count: number }[]) => void;
+  updateSeasonTotal: (tmdbId: number, season: number, total: number) => void;
+
+  isSeasonWatched: (tmdbId: number, season: number) => boolean;
+  seasonProgress: (tmdbId: number, season: number) => SeasonProgress | null;
+  markSeasonWatched: (tmdbId: number, season: number, total: number, episodeNumbers?: number[]) => void;
+  markSeasonUnwatched: (tmdbId: number, season: number) => void;
+
+  isEpisodeWatched: (tmdbId: number, season: number, episode: number) => boolean;
+  markEpisodeWatched: (tmdbId: number, season: number, episode: number, totalEpisodes?: number) => void;
+  markEpisodeUnwatched: (tmdbId: number, season: number, episode: number) => void;
+
+  // "Not interested"
+  isDismissed: (tmdbId: number) => boolean;
+  dismiss: (tmdbId: number, mediaType: string, title: string) => void;
+  undismiss: (tmdbId: number, mediaType: string) => void;
+
+  // Watchlist
+  isWatchlisted: (tmdbId: number) => boolean;
+  toggleWatchlist: (item: any) => void;
+}
+
+const WatchedContext = createContext<WatchedContextType>({
+  isWatched: () => false, markWatched: () => {}, markUnwatched: () => {},
+  showProgress: () => "none", partiallyWatchedIds: [],
+  initSeasonTotals: () => {}, updateSeasonTotal: () => {},
+  isSeasonWatched: () => false, seasonProgress: () => null,
+  markSeasonWatched: () => {}, markSeasonUnwatched: () => {},
+  isEpisodeWatched: () => false, markEpisodeWatched: () => {}, markEpisodeUnwatched: () => {},
+  isDismissed: () => false, dismiss: () => {}, undismiss: () => {},
+  isWatchlisted: () => false, toggleWatchlist: () => {},
+});
+
+function loadSet(key: string): Set<string> {
+  try { return new Set(JSON.parse(localStorage.getItem(key) || "[]")); } catch { return new Set(); }
+}
+function saveSet(key: string, s: Set<string>) {
+  localStorage.setItem(key, JSON.stringify([...s]));
+}
+function loadMap(key: string): Map<string, SeasonProgress> {
+  try { return new Map(JSON.parse(localStorage.getItem(key) || "[]")); } catch { return new Map(); }
+}
+function saveMap(key: string, m: Map<string, SeasonProgress>) {
+  localStorage.setItem(key, JSON.stringify([...m]));
+}
+
+export function WatchedProvider({ children }: { children: ReactNode }) {
+  // One-time reset of stale watch-state caches. Bump WC_VERSION whenever the
+  // backend watch-state shape changes so old (wrong) localStorage is discarded.
+  // The DB is the source of truth and re-seeds on load, so this is safe.
+  const WC_VERSION = "3";
+  if (typeof window !== "undefined" && localStorage.getItem("wc_version") !== WC_VERSION) {
+    ["wc_shows", "wc_episodes", "wc_progress", "wc_seasons", "wc_season_progress"]
+      .forEach(k => localStorage.removeItem(k));
+    localStorage.setItem("wc_version", WC_VERSION);
+  }
+
+  const [watchedShows, setWatchedShows] = useState<Set<string>>(() => loadSet("wc_shows"));
+  const [watchedEpisodes, setWatchedEpisodes] = useState<Set<string>>(() => loadSet("wc_episodes"));
+  const [progressMap, setProgressMap] = useState<Map<string, SeasonProgress>>(() => loadMap("wc_progress"));
+  const [dismissedIds, setDismissedIds] = useState<Set<string>>(() => loadSet("wc_dismissed"));
+  const [watchlistIds, setWatchlistIds] = useState<Set<string>>(() => loadSet("wc_watchlist"));
+
+  useEffect(() => { saveSet("wc_shows", watchedShows); }, [watchedShows]);
+  useEffect(() => { saveSet("wc_episodes", watchedEpisodes); }, [watchedEpisodes]);
+  useEffect(() => { saveMap("wc_progress", progressMap); }, [progressMap]);
+  useEffect(() => { saveSet("wc_dismissed", dismissedIds); }, [dismissedIds]);
+  useEffect(() => { saveSet("wc_watchlist", watchlistIds); }, [watchlistIds]);
+
+  // Load dismissals + watchlist from backend
+  useEffect(() => {
+    fetch("/api/watched/dismissed", { headers: pidHeaders() })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data?.tmdb_ids?.length) {
+          setDismissedIds(prev => new Set([...prev, ...data.tmdb_ids.map(String)]));
+        }
+      })
+      .catch(() => {});
+    fetch("/api/watchlist/ids", { headers: pidHeaders() })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        setWatchlistIds(new Set((data?.tmdb_ids ?? []).map(String)));
+      })
+      .catch(() => {});
+  }, []);
+
+  // Load from backend
+  useEffect(() => {
+    fetch("/api/watched/history", { headers: pidHeaders() })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!data) return;
+
+        if (data.tmdb_ids?.length) {
+          setWatchedShows(prev => new Set([...prev, ...data.tmdb_ids.map(String)]));
+        }
+
+        if (data.episodes?.length) {
+          setWatchedEpisodes(prev => {
+            const s = new Set(prev);
+            data.episodes.forEach((e: any) => s.add(epKey(e.tmdb_id, e.season, e.episode)));
+            return s;
+          });
+        }
+
+        // Load season watched counts (total=0 until TMDB confirms)
+        if (data.seasons?.length) {
+          setProgressMap(prev => {
+            const m = new Map(prev);
+            data.seasons.forEach((s: any) => {
+              const k = sKey(s.tmdb_id, s.season);
+              const existing = m.get(k);
+              m.set(k, {
+                watched: s.episodes_watched,
+                total: existing?.total ?? 0, // keep TMDB total if we already have it
+              });
+            });
+            return m;
+          });
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  // ── Shows ──────────────────────────────────────────────────────────────────
+  const isWatched = useCallback((id: number) => watchedShows.has(String(id)), [watchedShows]);
+  const markWatched = useCallback((id: number) => setWatchedShows(p => new Set([...p, String(id)])), []);
+  const markUnwatched = useCallback((id: number) => setWatchedShows(p => { const s = new Set(p); s.delete(String(id)); return s; }), []);
+
+  const showProgress = useCallback((tmdbId: number): "none" | "partial" | "full" => {
+    if (watchedShows.has(String(tmdbId))) return "full";
+
+    const hasAny = [...watchedEpisodes].some(k => k.startsWith(`${tmdbId}_`));
+    if (!hasAny) return "none";
+
+    // If all seasons with a known total are fully watched, treat the show as complete
+    const showSeasons = [...progressMap.entries()]
+      .filter(([k]) => k.startsWith(`${tmdbId}_`))
+      .map(([, v]) => v);
+
+    if (showSeasons.length > 0) {
+      const allComplete = showSeasons.every(s => s.total > 0 && s.watched >= s.total);
+      if (allComplete) return "full";
+    }
+
+    return "partial";
+  }, [watchedShows, watchedEpisodes, progressMap]);
+
+  const partiallyWatchedIds = (() => {
+    const ids = new Set<number>();
+    for (const k of watchedEpisodes) {
+      const tmdbId = parseInt(k.split("_")[0]);
+      if (!watchedShows.has(String(tmdbId))) ids.add(tmdbId);
+    }
+    return [...ids];
+  })();
+
+  // ── Season totals ──────────────────────────────────────────────────────────
+  const initSeasonTotals = useCallback((
+    tmdbId: number,
+    seasons: { season_number: number; episode_count: number }[]
+  ) => {
+    setProgressMap(prev => {
+      const m = new Map(prev);
+      let changed = false;
+      for (const s of seasons) {
+        const k = sKey(tmdbId, s.season_number);
+        const existing = m.get(k);
+        if (!existing) {
+          // No watch data at all — just record the total so progress bar works later
+          m.set(k, { watched: 0, total: s.episode_count });
+          changed = true;
+        } else if (existing.total !== s.episode_count) {
+          m.set(k, { ...existing, total: s.episode_count });
+          changed = true;
+        }
+      }
+      return changed ? m : prev;
+    });
+  }, []);
+
+  const updateSeasonTotal = useCallback((tmdbId: number, season: number, total: number) => {
+    setProgressMap(prev => {
+      const k = sKey(tmdbId, season);
+      const existing = prev.get(k);
+      if (!existing || existing.total === total) return prev;
+      return new Map([...prev, [k, { ...existing, total }]]);
+    });
+  }, []);
+
+  // ── Season watched state (derived from progress, no separate set) ──────────
+  const isSeasonWatched = useCallback((tmdbId: number, season: number): boolean => {
+    const p = progressMap.get(sKey(tmdbId, season));
+    if (!p) return false;
+    if (p.total === 0) return false; // total unknown — can't confirm complete
+    return p.watched >= p.total;
+  }, [progressMap]);
+
+  const seasonProgress = useCallback((tmdbId: number, season: number): SeasonProgress | null =>
+    progressMap.get(sKey(tmdbId, season)) ?? null, [progressMap]);
+
+  const markSeasonWatched = useCallback((tmdbId: number, season: number, total: number, episodeNumbers?: number[]) => {
+    setProgressMap(p => new Map([...p, [sKey(tmdbId, season), { watched: total, total }]]));
+    if (episodeNumbers?.length) {
+      setWatchedEpisodes(prev => {
+        const s = new Set(prev);
+        episodeNumbers.forEach(ep => s.add(epKey(tmdbId, season, ep)));
+        return s;
+      });
+    }
+  }, []);
+
+  const markSeasonUnwatched = useCallback((tmdbId: number, season: number) => {
+    const k = sKey(tmdbId, season);
+    setProgressMap(p => {
+      const existing = p.get(k);
+      if (!existing) return p;
+      return new Map([...p, [k, { watched: 0, total: existing.total }]]);
+    });
+    setWatchedEpisodes(p => {
+      const s = new Set(p);
+      [...s].filter(e => e.startsWith(`${tmdbId}_${season}_`)).forEach(e => s.delete(e));
+      return s;
+    });
+  }, []);
+
+  // ── Episodes ───────────────────────────────────────────────────────────────
+  const isEpisodeWatched = useCallback((tmdbId: number, season: number, episode: number) =>
+    watchedEpisodes.has(epKey(tmdbId, season, episode)), [watchedEpisodes]);
+
+  const markEpisodeWatched = useCallback((tmdbId: number, season: number, episode: number, totalEpisodes?: number) => {
+    const key = epKey(tmdbId, season, episode);
+    if (watchedEpisodes.has(key)) return; // already marked
+    setWatchedEpisodes(p => new Set([...p, key]));
+    setProgressMap(p => {
+      const k = sKey(tmdbId, season);
+      const current = p.get(k) ?? { watched: 0, total: totalEpisodes ?? 0 };
+      return new Map([...p, [k, {
+        watched: current.watched + 1,
+        total: totalEpisodes ?? current.total,
+      }]]);
+    });
+  }, [watchedEpisodes]);
+
+  const markEpisodeUnwatched = useCallback((tmdbId: number, season: number, episode: number) => {
+    const key = epKey(tmdbId, season, episode);
+    if (!watchedEpisodes.has(key)) return;
+    setWatchedEpisodes(p => { const s = new Set(p); s.delete(key); return s; });
+    setProgressMap(p => {
+      const k = sKey(tmdbId, season);
+      const current = p.get(k);
+      if (!current) return p;
+      return new Map([...p, [k, { ...current, watched: Math.max(0, current.watched - 1) }]]);
+    });
+  }, [watchedEpisodes]);
+
+  // ── Dismissals ─────────────────────────────────────────────────────────────
+  const isDismissed = useCallback((id: number) => dismissedIds.has(String(id)), [dismissedIds]);
+
+  const dismiss = useCallback((id: number, mediaType: string, title: string) => {
+    setDismissedIds(p => new Set([...p, String(id)]));
+    fetch("/api/watched/dismiss", {
+      method: "POST", headers: pidHeaders(),
+      body: JSON.stringify({ tmdb_id: id, media_type: mediaType, title }),
+    }).catch(() => {});
+  }, []);
+
+  const undismiss = useCallback((id: number, mediaType: string) => {
+    setDismissedIds(p => { const s = new Set(p); s.delete(String(id)); return s; });
+    fetch("/api/watched/dismiss", {
+      method: "DELETE", headers: pidHeaders(),
+      body: JSON.stringify({ tmdb_id: id, media_type: mediaType }),
+    }).catch(() => {});
+  }, []);
+
+  // ── Watchlist ──────────────────────────────────────────────────────────────
+  const isWatchlisted = useCallback((id: number) => watchlistIds.has(String(id)), [watchlistIds]);
+
+  const toggleWatchlist = useCallback((item: any) => {
+    const id = item.id;
+    const on = watchlistIds.has(String(id));
+    if (on) {
+      setWatchlistIds(p => { const s = new Set(p); s.delete(String(id)); return s; });
+      fetch("/api/watchlist", {
+        method: "DELETE", headers: pidHeaders(),
+        body: JSON.stringify({ tmdb_id: id, media_type: item.media_type }),
+      }).catch(() => {});
+    } else {
+      setWatchlistIds(p => new Set([...p, String(id)]));
+      fetch("/api/watchlist", {
+        method: "POST", headers: pidHeaders(),
+        body: JSON.stringify({
+          tmdb_id: id, media_type: item.media_type,
+          title: item.title || item.name || "", poster_url: item.poster_url,
+          vote_average: item.vote_average, overview: item.overview,
+          release_date: item.release_date, first_air_date: item.first_air_date,
+        }),
+      }).catch(() => {});
+    }
+  }, [watchlistIds]);
+
+  return (
+    <WatchedContext.Provider value={{
+      isWatched, markWatched, markUnwatched, showProgress, partiallyWatchedIds,
+      initSeasonTotals, updateSeasonTotal,
+      isSeasonWatched, seasonProgress, markSeasonWatched, markSeasonUnwatched,
+      isEpisodeWatched, markEpisodeWatched, markEpisodeUnwatched,
+      isDismissed, dismiss, undismiss,
+      isWatchlisted, toggleWatchlist,
+    }}>
+      {children}
+    </WatchedContext.Provider>
+  );
+}
+
+export const useWatched = () => useContext(WatchedContext);
