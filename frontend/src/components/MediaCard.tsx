@@ -95,19 +95,6 @@ export default function MediaCard({ item, onClick }: { item: Recommendation; onC
             fontSize: 14, lineHeight: "24px", textAlign: "center", padding: 0,
           }}
         >✕</button>
-        {/* Watchlist toggle — always visible when saved, on hover otherwise */}
-        <button
-          onClick={watchlistClick}
-          title={onWatchlist ? "Remove from watchlist" : "Add to watchlist"}
-          className={onWatchlist ? "" : "dismiss-btn"}
-          style={{
-            position: "absolute", top: 38, right: 8,
-            background: onWatchlist ? "var(--accent)" : "rgba(0,0,0,0.75)",
-            border: "none", borderRadius: "50%",
-            width: 24, height: 24, cursor: "pointer", color: "#fff",
-            fontSize: 13, lineHeight: "24px", textAlign: "center", padding: 0,
-          }}
-        >{onWatchlist ? "✓" : "+"}</button>
         <div style={{
           position: "absolute", top: 8, left: 8,
           background: "var(--accent)", borderRadius: 20,
@@ -127,9 +114,9 @@ export default function MediaCard({ item, onClick }: { item: Recommendation; onC
         <div style={{
           position: "absolute", bottom: 0, left: 0, right: 0,
           background: "linear-gradient(transparent, rgba(0,0,0,0.85))",
-          padding: "20px 8px 8px",
-          display: "flex", justifyContent: "center",
-          opacity: watched ? 1 : undefined,
+          padding: "24px 8px 8px",
+          display: "flex", flexDirection: "column", alignItems: "center", gap: 5,
+          opacity: (watched || onWatchlist) ? 1 : undefined,
         }}
           className="seen-overlay"
         >
@@ -139,13 +126,25 @@ export default function MediaCard({ item, onClick }: { item: Recommendation; onC
             style={{
               padding: "5px 14px", borderRadius: 20, border: "none",
               fontSize: 12, fontWeight: 600, cursor: "pointer",
-              background: error ? "var(--red)" : watched ? "var(--green)" : progress === "partial" ? "var(--yellow)" : "rgba(255,255,255,0.15)",
+              background: error ? "var(--red)" : watched ? "var(--green)" : progress === "partial" ? "var(--yellow)" : "rgba(255,255,255,0.2)",
               color: (watched || progress === "partial") ? "#000" : "#fff",
               backdropFilter: "blur(4px)",
               transition: "background 0.2s",
             }}
           >
             {loading ? "…" : error ? "Error" : watched ? "✓ Seen" : progress === "partial" ? "▶ Watching" : "Mark Seen"}
+          </button>
+          <button
+            onClick={watchlistClick}
+            title={onWatchlist ? "Remove from watchlist" : "Add to watchlist"}
+            style={{
+              padding: "5px 14px", borderRadius: 20, border: "none",
+              fontSize: 12, fontWeight: 600, cursor: "pointer",
+              background: onWatchlist ? "var(--accent)" : "rgba(255,255,255,0.2)",
+              color: "#fff", backdropFilter: "blur(4px)", transition: "background 0.2s",
+            }}
+          >
+            {onWatchlist ? "✓ Watchlist" : "+ Watchlist"}
           </button>
         </div>
       </div>
