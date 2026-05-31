@@ -7,7 +7,13 @@ import prefetch
 import database
 import asyncio
 import logging
+import os
 
+# Show our INFO-level sync/prefetch logs (Python defaults to WARNING otherwise).
+logging.basicConfig(
+    level=os.environ.get("LOG_LEVEL", "INFO"),
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
 logger = logging.getLogger(__name__)
 
 
