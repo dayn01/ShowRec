@@ -23,9 +23,13 @@ async def _get_token() -> str | None:
 
 async def get_trending_posts(limit_per_sub: int = 5) -> list[dict]:
     """
-    Fetch hot posts from TV/movie subreddits.
-    Falls back to unauthenticated public JSON if no Reddit credentials set.
+    Fetch hot posts from TV/movie subreddits (optional buzz for AI picks).
+    Requires Reddit credentials — Reddit now blocks unauthenticated server
+    requests, so we skip entirely if none are configured.
     """
+    if not settings.reddit_client_id or settings.reddit_client_id == "your_reddit_client_id_here":
+        return []
+
     posts = []
     token = await _get_token()
 

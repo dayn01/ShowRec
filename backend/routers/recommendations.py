@@ -10,58 +10,14 @@ router = APIRouter(prefix="/recommendations", tags=["recommendations"])
 
 
 async def _gather_history(profile_id: int = 1) -> list[dict]:
-    # Prefer the local watch_state DB — works without Trakt
-    db_items = await database.get_watched_for_recommendations(profile_id)
-    if db_items:
-        return db_items
-
-    # Fallback: live fetch from all sources (first run before sync completes)
-    items: list[dict] = []
-
-    try:
-        shows = await trakt.get_watch_history("shows", limit=50)
-        movies = await trakt.get_watch_history("movies", limit=50)
-        for entry in shows:
-            show = entry.get("show", {})
-            ids = show.get("ids", {})
-            items.append({"title": show.get("title"), "media_type": "tv",
-                          "tmdb_id": ids.get("tmdb"), "genres": []})
-        for entry in movies:
-            movie = entry.get("movie", {})
-            ids = movie.get("ids", {})
-            items.append({"title": movie.get("title"), "media_type": "movie",
-                          "tmdb_id": ids.get("tmdb"), "genres": []})
-    except Exception:
-        pass
-
-    if settings.jellyfin_url:
-        try:
-            jf_items = await jellyfin.get_watch_history(limit=100)
-            for item in jf_items:
-                provider_ids = item.get("ProviderIds", {})
-                tmdb_id = provider_ids.get("Tmdb") or provider_ids.get("tmdb")
-                media_type = "movie" if item.get("Type") == "Movie" else "tv"
-                items.append({"title": item.get("Name"), "media_type": media_type,
-                              "tmdb_id": int(tmdb_id) if tmdb_id else None,
-                              "genres": item.get("Genres", [])})
-        except Exception:
-            pass
-
-    if settings.plex_url:
-        try:
-            from integrations import plex
-            plex_items = plex.get_watch_history(limit=100)
-            for item in plex_items:
-                guids = item.get("guids", {})
-                tmdb_id = guids.get("tmdb")
-                media_type = "movie" if item.get("type") == "movie" else "tv"
-                items.append({"title": item.get("title"), "media_type": media_type,
-                              "tmdb_id": int(tmdb_id) if tmdb_id else None,
-                              "genres": item.get("genres", [])})
-        except Exception:
-            pass
-
-    return items
+    """
+    A profile's watch history — strictly from its own watch_state in SQLite.
+    The watch_state is seeded per-profile from that profile's linked accounts by
+    the sync job. We intentionally do NOT fall back to the global Jellyfin/Plex/
+    Trakt accounts, which would leak the owner's data into other profiles.
+    """
+    items = await database.get_watched_for_recommendations(profile_id)
+    return [i for i in items if i.get("tmdb_id")]  # drop any null ids
 
 
 @router.get("")
