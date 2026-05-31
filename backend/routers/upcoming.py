@@ -8,21 +8,35 @@ import database
 router = APIRouter(prefix="/upcoming", tags=["upcoming"])
 
 
+def _window(cached: dict, days: int) -> list:
+    today = date.today().isoformat()
+    cutoff = (date.today() + timedelta(days=days)).isoformat()
+    return [
+        e for e in cached.get("episodes", [])
+        if today <= e.get("first_aired", "")[:10] <= cutoff
+    ]
+
+
 @router.get("")
 async def get_upcoming(days: int = Query(30, le=90), pid: int = Depends(get_profile_id)):
     cached = await database.cache_get(pkey(pid, "upcoming"), "upcoming")
     if cached:
-        today = date.today().isoformat()
-        cutoff = (date.today() + timedelta(days=days)).isoformat()
-        episodes = [
-            e for e in cached.get("episodes", [])
-            if today <= e.get("first_aired", "")[:10] <= cutoff
-        ]
-        return {"episodes": episodes, "days": days, "from_cache": True}
+        return {"episodes": _window(cached, days), "days": days, "from_cache": True}
 
-    # Live fallback — Trakt only
-    calendar = await trakt.get_calendar_shows(days=days)
-    return {"episodes": calendar, "days": days, "from_cache": False}
+    # No cache yet — build it on demand from THIS profile's watch state (not global Trakt)
+    import prefetch
+    history = await database.get_watched_for_recommendations(pid)
+    if not history:
+        # Profile has no synced data yet — kick off a background sync so it's ready next time
+        import asyncio
+        asyncio.create_task(prefetch.refresh_profile(pid))
+        return {"episodes": [], "days": days, "from_cache": False, "building": True}
+
+    built = await prefetch._build_upcoming(history, pid)
+    if built:
+        await database.cache_set(pkey(pid, "upcoming"), built)
+        return {"episodes": _window(built, days), "days": days, "from_cache": False}
+    return {"episodes": [], "days": days, "from_cache": False}
 
 
 @router.get("/jellyfin-users")

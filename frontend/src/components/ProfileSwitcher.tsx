@@ -90,6 +90,14 @@ export default function ProfileSwitcher() {
     } catch {}
   }
 
+  const [refreshing, setRefreshing] = useState<number | null>(null);
+  async function refresh(id: number) {
+    setRefreshing(id);
+    try { await api.refreshProfile(id); } catch {}
+    // Give the background sync a moment, then clear the indicator
+    setTimeout(() => setRefreshing(r => (r === id ? null : r)), 4000);
+  }
+
   return (
     <div style={{ position: "relative" }}>
       <button
@@ -134,6 +142,10 @@ export default function ProfileSwitcher() {
                   </div>
                 </div>
                 {p.id === activeId && <span style={{ color: "var(--accent2)", fontSize: 13 }}>✓</span>}
+                <button onClick={e => { e.stopPropagation(); refresh(p.id); }} title="Re-sync this profile's account"
+                  style={{ background: "none", border: "none", color: refreshing === p.id ? "var(--accent2)" : "var(--muted)", cursor: "pointer", fontSize: 13 }}>
+                  {refreshing === p.id ? "⏳" : "↻"}
+                </button>
                 <button onClick={e => { e.stopPropagation(); openEdit(p); }} title="Edit"
                   style={{ background: "none", border: "none", color: "var(--muted)", cursor: "pointer", fontSize: 13 }}>✎</button>
                 {profiles.length > 1 && (

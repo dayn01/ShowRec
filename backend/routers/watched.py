@@ -189,7 +189,12 @@ async def mark_episode_unwatched(item: WatchedEpisode, pid: int = Depends(get_pr
 
 @router.get("/history")
 async def get_watched_history(pid: int = Depends(get_profile_id)):
-    return await database.get_watch_state(pid)
+    state = await database.get_watch_state(pid)
+    # If this profile has nothing yet, kick off a background sync of its linked account
+    if not state.get("tmdb_ids") and not state.get("episodes"):
+        import asyncio, prefetch
+        asyncio.create_task(prefetch.refresh_profile(pid))
+    return state
 
 
 @router.get("/sources")
