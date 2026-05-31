@@ -209,6 +209,13 @@ async def get_watched_library(pid: int = Depends(get_profile_id)):
     from routers.details import _fetch_and_cache_show
     rows = await database.get_watched_library(pid)
 
+    # Also include shows fully watched via episodes (no explicit show-level mark)
+    state = await database.get_watch_state(pid)
+    existing = {(r["media_type"], r["tmdb_id"]) for r in rows}
+    for tid in state.get("complete_tmdb_ids", []):
+        if ("tv", tid) not in existing:
+            rows.append({"tmdb_id": tid, "media_type": "tv", "title": ""})
+
     async def enrich(row):
         tmdb_id, mt = row["tmdb_id"], row["media_type"]
         cached = await database.get_show(tmdb_id)
