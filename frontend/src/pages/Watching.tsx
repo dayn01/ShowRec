@@ -22,6 +22,7 @@ export default function Watching() {
   const [shows, setShows] = useState<ShowDetail[]>([]);
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState<number | null>(null);
+  const [query, setQuery] = useState("");
 
   useEffect(() => {
     if (partiallyWatchedIds.length === 0) return;
@@ -43,7 +44,11 @@ export default function Watching() {
   }, [partiallyWatchedIds.join(",")]);
 
   // Only show shows that still have unwatched episodes (progress = "partial")
-  const inProgressShows = shows.filter(show => showProgress(show.id) === "partial");
+  const allInProgress = shows.filter(show => showProgress(show.id) === "partial");
+  const q = query.trim().toLowerCase();
+  const inProgressShows = q
+    ? allInProgress.filter(s => (s.title || "").toLowerCase().includes(q))
+    : allInProgress;
 
   if (!loading && partiallyWatchedIds.length === 0) {
     return (
@@ -57,12 +62,47 @@ export default function Watching() {
 
   return (
     <div>
-      <p style={{ color: "var(--muted)", fontSize: 13, marginBottom: 20 }}>
-        {loading ? "Loading…" : `${inProgressShows.length} show${inProgressShows.length !== 1 ? "s" : ""} in progress`}
+      <p style={{ color: "var(--muted)", fontSize: 13, marginBottom: 12 }}>
+        {loading
+          ? "Loading…"
+          : q
+          ? `${inProgressShows.length} of ${allInProgress.length} shows`
+          : `${allInProgress.length} show${allInProgress.length !== 1 ? "s" : ""} in progress`}
       </p>
+
+      {/* Search */}
+      {allInProgress.length > 0 && (
+        <div style={{ position: "relative", marginBottom: 20, maxWidth: 420 }}>
+          <span style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", color: "var(--muted)", fontSize: 14 }}>🔍</span>
+          <input
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            placeholder="Search what you're watching…"
+            style={{
+              width: "100%", padding: "10px 14px 10px 38px",
+              background: "var(--surface)", border: "1px solid var(--border)",
+              borderRadius: 10, color: "var(--text)", fontSize: 14, outline: "none",
+            }}
+            onFocus={e => { e.target.style.borderColor = "var(--accent)"; }}
+            onBlur={e => { e.target.style.borderColor = "var(--border)"; }}
+          />
+          {query && (
+            <button onClick={() => setQuery("")} style={{
+              position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)",
+              background: "none", border: "none", color: "var(--muted)", cursor: "pointer", fontSize: 14,
+            }}>✕</button>
+          )}
+        </div>
+      )}
 
       {loading && (
         <div style={{ color: "var(--muted)", textAlign: "center", padding: 60 }}>Loading…</div>
+      )}
+
+      {!loading && q && inProgressShows.length === 0 && (
+        <div style={{ color: "var(--muted)", textAlign: "center", padding: 40, fontSize: 14 }}>
+          No shows match "{query}".
+        </div>
       )}
 
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
