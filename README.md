@@ -140,7 +140,44 @@ up everything (profiles, watchlist, watch state).
 | Reach it by a name like `http://showrec.home` instead of an IP:port | [`DOCKER.md`](DOCKER.md) → "Give it a hostname" |
 | Run it on a Raspberry Pi | [`DOCKER.md`](DOCKER.md) — it's ARM-ready (use 64-bit OS) |
 | Access it securely over the internet with a login gate | [`CLOUDFLARE.md`](CLOUDFLARE.md) |
-| Import your Netflix viewing history | `docker compose exec backend python import_netflix.py /data/netflix.csv 1` |
+| Import your Netflix viewing history | [see below](#import-your-netflix-history) |
+
+### Import your Netflix history
+
+If you've watched on Netflix, you can bulk-import that history so it counts toward
+recommendations and shows up as watched.
+
+1. **Download your history from Netflix:**
+   <https://www.netflix.com/viewingactivity> → scroll down → **Download all**.
+   You get a `NetflixViewingActivity.csv`.
+
+2. **Copy the CSV into the app's data folder** (`./data` is mounted into the
+   container). From the machine that has the file:
+   ```bash
+   # if it's already on the server:
+   cp NetflixViewingActivity.csv ~/showrec/data/netflix.csv
+
+   # or copy it from another machine over SSH (run from where the file is):
+   scp NetflixViewingActivity.csv USER@SERVER:~/showrec/data/netflix.csv
+   ```
+
+3. **Run the importer** — the last number is the **profile id** to import into
+   (`1` is the default profile; check the profile menu if you have several):
+   ```bash
+   docker compose exec backend python import_netflix.py /data/netflix.csv 1
+   ```
+   It resolves each title against TMDB and prints a summary of how many movies and
+   episodes it matched, plus any rows it couldn't match.
+
+4. **Refresh the profile** so "seen" state and recommendations update:
+   ```bash
+   curl -X POST http://localhost:8087/api/profiles/1/refresh
+   ```
+
+> Netflix's export only gives episode *titles* (not numbers) and inconsistent
+> season labels, so matching is best-effort — expect a handful of unmatched rows
+> (they're listed in the report). It only *adds* watched items and is safe to
+> re-run. Watch dates aren't preserved (everything imports as "watched").
 
 ---
 
