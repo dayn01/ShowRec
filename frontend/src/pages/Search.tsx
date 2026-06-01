@@ -39,21 +39,25 @@ export default function Search() {
     if (debounce.current) window.clearTimeout(debounce.current);
     setSimilarFor(null);   // a new query exits the "similar to" view
     if (query.trim().length < 2) {
-      setResults([]); setSearched(false); return;
+      setResults([]); setSearched(false); setLoading(false); return;
     }
+    // Guard against an in-flight request resolving after the query changed/cleared
+    // (otherwise the tiles can reappear after you empty the box).
+    let cancelled = false;
     debounce.current = window.setTimeout(async () => {
       setLoading(true);
       try {
         const data = await api.searchTitles(query.trim(), type);
+        if (cancelled) return;
         setResults(data.results);
         setSearched(true);
       } catch {
-        setResults([]);
+        if (!cancelled) setResults([]);
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     }, 350);
-    return () => { if (debounce.current) window.clearTimeout(debounce.current); };
+    return () => { cancelled = true; if (debounce.current) window.clearTimeout(debounce.current); };
   }, [query, type]);
 
   const similarTitle = similarFor?.title || similarFor?.name || "";
