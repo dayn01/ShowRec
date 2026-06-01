@@ -26,7 +26,7 @@ interface ShowDetail {
 }
 
 export default function Watching() {
-  const { partiallyWatchedIds, seasonProgress, isSeasonWatched, initSeasonTotals, showProgress } = useWatched();
+  const { partiallyWatchedIds, seasonProgress, isSeasonWatched, initSeasonTotals, showProgress, isDismissed } = useWatched();
   const [shows, setShows] = useState<ShowDetail[]>([]);
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState<number | null>(null);
@@ -52,7 +52,7 @@ export default function Watching() {
   }, [partiallyWatchedIds.join(",")]);
 
   // Only show shows that still have unwatched episodes (progress = "partial")
-  const allInProgress = shows.filter(show => showProgress(show.id) === "partial");
+  const allInProgress = shows.filter(show => showProgress(show.id) === "partial" && !isDismissed(show.id));
   const q = query.trim().toLowerCase();
   const inProgressShows = q
     ? allInProgress.filter(s => (s.title || "").toLowerCase().includes(q))

@@ -113,12 +113,16 @@ async def _tastedive_candidates(history: list[dict], sample_per_type: int = 6,
 
 async def _build_recommendations(history: list[dict], profile_id: int = 1) -> dict | None:
     from collections import Counter
+    # "Not interested" titles shouldn't shape the taste profile or seed similar
+    # picks (TMDB recs / TasteDive), so drop them from the history first.
+    dismissed = set(await database.get_dismissed_ids(profile_id))
+    history = [h for h in history if h.get("tmdb_id") not in dismissed]
     watched_ids = [(h["tmdb_id"], h["media_type"]) for h in history if h.get("tmdb_id")]
     if not watched_ids:
         return None
 
     seen_ids = {tid for tid, _ in watched_ids}
-    seen_ids |= set(await database.get_dismissed_ids(profile_id))  # exclude "not interested"
+    seen_ids |= dismissed  # also exclude them from the candidate results
     taste = await _build_taste_profile(history)
     genre_affinity = taste["genres"]
     max_genre = max(genre_affinity.values()) if genre_affinity else 1
