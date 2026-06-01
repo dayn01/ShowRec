@@ -4,8 +4,9 @@ import { useWatched } from "../WatchedContext";
 
 const PLACEHOLDER = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='300' viewBox='0 0 200 300'%3E%3Crect width='200' height='300' fill='%231a1a24'/%3E%3Ctext x='100' y='155' text-anchor='middle' fill='%234444aa' font-size='14' font-family='sans-serif'%3ENo Image%3C/text%3E%3C/svg%3E";
 
-export default function MediaCard({ item, onClick, onMarkedSeen, fading }: {
+export default function MediaCard({ item, onClick, onMarkedSeen, fading, onSimilar }: {
   item: Recommendation; onClick: () => void; onMarkedSeen?: () => void; fading?: boolean;
+  onSimilar?: () => void;
 }) {
   const title = item.title || item.name || "Unknown";
   const year = (item.release_date || item.first_air_date || "").slice(0, 4);
@@ -151,6 +152,20 @@ export default function MediaCard({ item, onClick, onMarkedSeen, fading }: {
           >
             {onWatchlist ? "✓ Watchlist" : "+ Watchlist"}
           </button>
+          {onSimilar && (
+            <button
+              onClick={e => { e.stopPropagation(); onSimilar(); }}
+              title="Find similar titles"
+              style={{
+                padding: "5px 14px", borderRadius: 20, border: "none",
+                fontSize: 12, fontWeight: 600, cursor: "pointer",
+                background: "rgba(255,255,255,0.2)", color: "#fff",
+                backdropFilter: "blur(4px)", transition: "background 0.2s",
+              }}
+            >
+              ≈ Similar
+            </button>
+          )}
         </div>
       </div>
 
