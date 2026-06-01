@@ -4,7 +4,9 @@ import { useWatched } from "../WatchedContext";
 
 const PLACEHOLDER = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='300' viewBox='0 0 200 300'%3E%3Crect width='200' height='300' fill='%231a1a24'/%3E%3Ctext x='100' y='155' text-anchor='middle' fill='%234444aa' font-size='14' font-family='sans-serif'%3ENo Image%3C/text%3E%3C/svg%3E";
 
-export default function MediaCard({ item, onClick }: { item: Recommendation; onClick: () => void }) {
+export default function MediaCard({ item, onClick, onMarkedSeen, fading }: {
+  item: Recommendation; onClick: () => void; onMarkedSeen?: () => void; fading?: boolean;
+}) {
   const title = item.title || item.name || "Unknown";
   const year = (item.release_date || item.first_air_date || "").slice(0, 4);
   const score = Math.round(item.vote_average * 10);
@@ -40,6 +42,7 @@ export default function MediaCard({ item, onClick }: { item: Recommendation; onC
         const res: any = await api.markWatched(item.id, item.media_type, title, parseInt(year) || undefined);
         if (item.media_type === "tv" && res?.seasons) markShowComplete(item.id, res.seasons);
         else markWatched(item.id);
+        onMarkedSeen?.();   // let the parent linger + fade the card before removing it
       }
     } catch {
       setError(true);
@@ -57,7 +60,9 @@ export default function MediaCard({ item, onClick }: { item: Recommendation; onC
       overflow: "hidden",
       display: "flex",
       flexDirection: "column",
-      transition: "transform 0.15s, box-shadow 0.15s",
+      transition: "transform 0.15s, box-shadow 0.15s, opacity 0.45s",
+      opacity: fading ? 0 : 1,
+      pointerEvents: fading ? "none" : undefined,
       cursor: "pointer",
     }}
       onMouseEnter={e => {

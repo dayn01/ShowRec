@@ -252,6 +252,18 @@ export default function Dashboard() {
   const [forYouMeta, setForYouMeta] = useState<{ top_genres?: string[]; based_on?: number; trakt_blended?: boolean; tastedive_blended?: boolean; ai_blended?: boolean } | null>(null);
   const [aiEnabled, setAiEnabled] = useState(true);
   const [tuning, setTuning] = useState(false);
+  // After "Mark Seen", keep the card around briefly (showing ✓ Seen) then fade it out.
+  const [lingering, setLingering] = useState<Set<number>>(new Set());
+  const [fadingOut, setFadingOut] = useState<Set<number>>(new Set());
+
+  function handleMarkedSeen(id: number) {
+    setLingering(prev => new Set(prev).add(id));
+    window.setTimeout(() => setFadingOut(prev => new Set(prev).add(id)), 1400);
+    window.setTimeout(() => {
+      setLingering(prev => { const n = new Set(prev); n.delete(id); return n; });
+      setFadingOut(prev => { const n = new Set(prev); n.delete(id); return n; });
+    }, 1850);
+  }
 
   useEffect(() => {
     api.getStatus().then(s => setAiEnabled(!!s.ai_enabled)).catch(() => {});
@@ -294,7 +306,8 @@ export default function Dashboard() {
     !isDismissed(i.id) &&
     (i.media_type === "tv" ? showProgress(i.id) !== "full" : !isWatched(i.id));
 
-  let baseItems = active.items.filter(notWatched);
+  const shouldShow = (i: any) => notWatched(i) || lingering.has(i.id);
+  let baseItems = active.items.filter(shouldShow);
   // For You media-type sub-filter
   if (tab === "for-you" && forYouType !== "all") {
     baseItems = baseItems.filter((i: any) => i.media_type === forYouType);
@@ -381,6 +394,8 @@ export default function Dashboard() {
           <div className="media-grid">
             {displayItems.map((item: any) => (
               <MediaCard key={item.id} item={item}
+                fading={fadingOut.has(item.id)}
+                onMarkedSeen={() => handleMarkedSeen(item.id)}
                 onClick={() => setSelected({ id: item.id, mediaType: item.media_type })} />
             ))}
           </div>
