@@ -1,6 +1,28 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api, DetailedMedia, Recommendation } from "../api";
+
+// Let a vertical mouse wheel scroll a horizontal row. Uses a non-passive native
+// listener (React's onWheel is passive, so preventDefault is ignored there).
+function useHorizontalWheel<T extends HTMLElement>() {
+  const cleanup = useRef<(() => void) | null>(null);
+  return useCallback((el: T | null) => {
+    cleanup.current?.();
+    cleanup.current = null;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (e.deltaY === 0 || el.scrollWidth <= el.clientWidth) return;
+      const atStart = el.scrollLeft <= 0;
+      const atEnd = el.scrollLeft + el.clientWidth >= el.scrollWidth - 1;
+      // At an edge, let the page/modal keep scrolling vertically.
+      if ((e.deltaY < 0 && atStart) || (e.deltaY > 0 && atEnd)) return;
+      e.preventDefault();
+      el.scrollLeft += e.deltaY;
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    cleanup.current = () => el.removeEventListener("wheel", onWheel);
+  }, []);
+}
 import SeasonRow from "./SeasonRow";
 import { useWatched } from "../WatchedContext";
 
@@ -57,6 +79,10 @@ export default function DetailModal({ tmdbId, mediaType, onClose }: Props) {
   const similarItems = similar?.results ?? [];
   const showSimilarSection = tasteDive && (similarLoading || similarItems.length > 0);
 
+  // Vertical wheel → horizontal scroll for the Cast and More Like This rows.
+  const castWheelRef = useHorizontalWheel<HTMLDivElement>();
+  const similarWheelRef = useHorizontalWheel<HTMLDivElement>();
+
   // Auto-expand the current/latest season and trigger background season prefetch
   const [autoExpandSeason, setAutoExpandSeason] = useState<number | null>(null);
   useEffect(() => {
@@ -94,7 +120,7 @@ export default function DetailModal({ tmdbId, mediaType, onClose }: Props) {
   }, []);
 
   const { isWatched, markWatched, markUnwatched, markShowComplete, initSeasonTotals,
-          isWatchlisted, toggleWatchlist, dismiss } = useWatched();
+          isWatchlisted, toggleWatchlist, dismiss, showProgress } = useWatched();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
 
@@ -337,7 +363,7 @@ export default function DetailModal({ tmdbId, mediaType, onClose }: Props) {
             {data.cast && data.cast.length > 0 && (
               <div style={{ padding: "0 24px 24px" }}>
                 <h3 style={{ fontSize: 15, fontWeight: 600, marginBottom: 12, color: "var(--accent2)" }}>Cast</h3>
-                <div style={{ display: "flex", gap: 12, overflowX: "auto", paddingBottom: 8 }}>
+                <div ref={castWheelRef} style={{ display: "flex", gap: 12, overflowX: "auto", paddingBottom: 8 }}>
                   {data.cast.map((c, i) => (
                     <div key={i} style={{ flexShrink: 0, width: 80, textAlign: "center" }}>
                       <img
@@ -360,7 +386,7 @@ export default function DetailModal({ tmdbId, mediaType, onClose }: Props) {
                 <h3 style={{ fontSize: 15, fontWeight: 600, marginBottom: 12, color: "var(--accent2)" }}>
                   More Like This
                 </h3>
-                <div style={{ display: "flex", gap: 12, overflowX: "auto", paddingBottom: 8 }}>
+                <div ref={similarWheelRef} style={{ display: "flex", gap: 12, overflowX: "auto", paddingBottom: 8 }}>
                   {similarLoading && similarItems.length === 0
                     ? Array.from({ length: 8 }).map((_, i) => (
                         <div key={`sk-${i}`} style={{ flexShrink: 0, width: 110 }}>
@@ -370,6 +396,11 @@ export default function DetailModal({ tmdbId, mediaType, onClose }: Props) {
                       ))
                     : similarItems.map(item => {
                     const simScore = Math.round((item.vote_average || 0) * 10);
+                    const progress = item.media_type === "tv"
+                      ? showProgress(item.id)
+                      : (isWatched(item.id) ? "full" : "none");
+                    const statusLabel = progress === "full" ? "✓ Seen" : progress === "partial" ? "▶ Watching" : null;
+                    const statusColor = progress === "full" ? "var(--green)" : "var(--yellow)";
                     return (
                       <div
                         key={`${item.media_type}-${item.id}`}
@@ -381,9 +412,17 @@ export default function DetailModal({ tmdbId, mediaType, onClose }: Props) {
                           <img
                             src={item.poster_url || PLACEHOLDER}
                             alt={item.title || item.name}
-                            style={{ width: 110, height: 165, objectFit: "cover", borderRadius: 8, border: "1px solid var(--border)" }}
+                            style={{ width: 110, height: 165, objectFit: "cover", borderRadius: 8,
+                              border: `1px solid ${statusLabel ? statusColor : "var(--border)"}` }}
                             onError={e => { (e.target as HTMLImageElement).src = PLACEHOLDER; }}
                           />
+                          {statusLabel && (
+                            <div style={{
+                              position: "absolute", top: 6, left: 6,
+                              background: statusColor, borderRadius: 12,
+                              padding: "1px 7px", fontSize: 10, fontWeight: 700, color: "#000",
+                            }}>{statusLabel}</div>
+                          )}
                           {simScore > 0 && (
                             <div style={{
                               position: "absolute", top: 6, right: 6,
