@@ -20,12 +20,48 @@ async def _gather_history(profile_id: int = 1) -> list[dict]:
     return [i for i in items if i.get("tmdb_id")]  # drop any null ids
 
 
+def _apply_rec_settings(recs: list[dict], settings: dict) -> list[dict]:
+    """
+    Re-rank a profile's cached recommendations using its tuning:
+      - genre_weight: scales the learned genre-affinity component (default 1.0)
+      - genre_multipliers: {genre name -> factor}; 0 hides the genre entirely
+    Defaults reproduce the stored ranking exactly (no-op).
+    """
+    genre_weight = settings.get("genre_weight", 1.0)
+    multipliers = settings.get("genre_multipliers") or {}
+    if genre_weight == 1.0 and not multipliers:
+        return recs
+
+    from prefetch import GENRE_MAP  # lazy import avoids a circular import at load
+    out: list[dict] = []
+    for item in recs:
+        base = item.get("base_score", item.get("score", 0) or 0)
+        score = base + genre_weight * item.get("genre_component", 0)
+
+        factor, excluded = 1.0, False
+        for gid in item.get("genre_ids", []):
+            name = GENRE_MAP.get(gid)
+            if name in multipliers:
+                v = multipliers[name]
+                if v <= 0:
+                    excluded = True
+                    break
+                factor *= v
+        if excluded:
+            continue
+        out.append({**item, "score": round(score * factor, 2)})
+
+    out.sort(key=lambda x: x.get("score", 0), reverse=True)
+    return out
+
+
 @router.get("")
 async def get_recs(limit: int = Query(40, le=200), page: int = Query(1, ge=1),
                    pid: int = Depends(get_profile_id)):
+    rec_settings = await database.get_rec_settings(pid)
     cached = await database.cache_get(pkey(pid, "recommendations"), "recommendations")
     if cached:
-        recs = cached.get("recommendations", [])
+        recs = _apply_rec_settings(cached.get("recommendations", []), rec_settings)
         start = (page - 1) * limit
         return {
             "recommendations": recs[start:start + limit],
@@ -47,7 +83,9 @@ async def get_recs(limit: int = Query(40, le=200), page: int = Query(1, ge=1),
     recs = await get_recommendations(watched_ids, genre_profile, limit=40)
     result = {"recommendations": recs, "based_on": len(watched_ids)}
     await database.cache_set(pkey(pid, "recommendations"), result)
-    return {**result, "total": len(recs), "from_cache": False}
+    recs = _apply_rec_settings(recs, rec_settings)
+    return {"recommendations": recs[: limit], "based_on": len(watched_ids),
+            "total": len(recs), "from_cache": False}
 
 
 @router.get("/trending")

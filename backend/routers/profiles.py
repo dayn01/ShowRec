@@ -82,6 +82,36 @@ async def update_profile(profile_id: int, p: ProfileUpdate):
     return await database.get_profile(profile_id)
 
 
+class RecSettingsIn(BaseModel):
+    genre_weight: float = 1.0                       # scales learned genre affinity
+    genre_multipliers: dict[str, float] = {}        # genre name -> factor (0 = hide)
+
+
+@router.get("/{profile_id}/rec-settings")
+async def read_rec_settings(profile_id: int):
+    if not await database.get_profile(profile_id):
+        raise HTTPException(404, "Profile not found")
+    s = await database.get_rec_settings(profile_id)
+    return {
+        "genre_weight": s.get("genre_weight", 1.0),
+        "genre_multipliers": s.get("genre_multipliers") or {},
+    }
+
+
+@router.put("/{profile_id}/rec-settings")
+async def write_rec_settings(profile_id: int, s: RecSettingsIn):
+    if not await database.get_profile(profile_id):
+        raise HTTPException(404, "Profile not found")
+    gw = max(0.0, min(2.0, s.genre_weight))
+    # Only persist genres the user actually moved off the 1.0 default.
+    mults = {k: max(0.0, min(2.0, v)) for k, v in s.genre_multipliers.items()
+             if abs(v - 1.0) > 1e-9}
+    saved = {"genre_weight": gw, "genre_multipliers": mults}
+    await database.set_rec_settings(profile_id, saved)
+    # Tuning is applied on read, so no rebuild needed — the feed re-ranks instantly.
+    return saved
+
+
 @router.delete("/{profile_id}")
 async def delete_profile(profile_id: int):
     ids = await database.all_profile_ids()

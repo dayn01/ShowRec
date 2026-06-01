@@ -126,6 +126,7 @@ async def init():
                 jellyfin_user_id TEXT,    -- NULL = standalone profile
                 plex_token       TEXT,
                 trakt_token      TEXT,
+                rec_settings     TEXT,    -- JSON: per-profile recommendation tuning
                 created_at       INTEGER NOT NULL
             );
             -- Local watch state — the source of truth, independent of Trakt.
@@ -167,6 +168,9 @@ async def init():
         """)
         # Migrate legacy tables to add profile_id BEFORE creating the profile index
         await _migrate_add_profiles(db)
+        # Add rec_settings to profiles created before tuning existed
+        if await _table_exists(db, "profiles") and not await _has_column(db, "profiles", "rec_settings"):
+            await db.execute("ALTER TABLE profiles ADD COLUMN rec_settings TEXT")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_watch_profile ON watch_state(profile_id)")
 
         # Seed a default profile from the configured Jellyfin user if none exist
@@ -238,6 +242,28 @@ async def all_profile_ids() -> list[int]:
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute("SELECT id FROM profiles ORDER BY id") as cur:
             return [r[0] for r in await cur.fetchall()]
+
+
+async def get_rec_settings(profile_id: int) -> dict:
+    """Per-profile recommendation tuning ({} when unset)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT rec_settings FROM profiles WHERE id=?", (profile_id,)) as cur:
+            row = await cur.fetchone()
+    if not row or not row[0]:
+        return {}
+    try:
+        return json.loads(row[0])
+    except (ValueError, TypeError):
+        return {}
+
+
+async def set_rec_settings(profile_id: int, settings: dict):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE profiles SET rec_settings=? WHERE id=?",
+            (json.dumps(settings), profile_id)
+        )
+        await db.commit()
 
 
 # ── Dismissals ("not interested") ─────────────────────────────────────────────

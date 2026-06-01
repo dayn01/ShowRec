@@ -32,6 +32,11 @@ export interface Profile {
   trakt_token: string | null;
 }
 
+export interface RecSettings {
+  genre_weight: number;
+  genre_multipliers: Record<string, number>;
+}
+
 export interface Recommendation {
   id: number;
   title?: string;
@@ -224,6 +229,14 @@ export const api = {
 
   // ── Profiles ──
   getProfiles: () => get<{ profiles: Profile[] }>(`/profiles`),
+  getRecSettings: (profileId: number) =>
+    get<RecSettings>(`/profiles/${profileId}/rec-settings`),
+  saveRecSettings: (profileId: number, body: RecSettings) =>
+    fetch(`/api/profiles/${profileId}/rec-settings`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", "X-Profile-Id": String(getProfileId()) },
+      body: JSON.stringify(body),
+    }).then(r => { if (!r.ok) throw new Error(r.statusText); return r.json() as Promise<RecSettings>; }),
   getPlexUsers: () => get<{ users: { id: string; title: string; owner: boolean }[] }>(`/plex-users`),
   createProfile: (body: { name: string; emoji: string; jellyfin_user_id?: string | null; plex_user?: string | null }) =>
     fetch(`/api/profiles`, {

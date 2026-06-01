@@ -269,17 +269,21 @@ async def _build_recommendations(history: list[dict], profile_id: int = 1) -> di
                 "_freq": 0, "_trakt": 0, "_taste": 0, "_tastedive": 3,
             }
 
-    # Final weighted score
+    # Final weighted score. We split it into a genre-affinity component and the
+    # rest ("base"), and persist both so the recommendations API can re-weight on
+    # read from each profile's tuning (genre slider + per-genre multipliers).
     for item in scored.values():
-        item["score"] = round(
+        genre_component = item["_genre"]
+        base = (
             item["_freq"] * 3.0          # how often recommended across your library
-            + item["_genre"]             # genre affinity match
             + item.get("_taste", 0)      # theme/actor taste match (discover)
             + item.get("_tastedive", 0)  # TasteDive 'also like' similarity
             + item["_quality"] * 0.8     # overall quality
-            + item["_trakt"],            # Trakt personal endorsement
-            2,
+            + item["_trakt"]             # Trakt personal endorsement
         )
+        item["base_score"] = round(base, 2)
+        item["genre_component"] = round(genre_component, 2)
+        item["score"] = round(base + genre_component, 2)
 
     # Keep up to 75 of each media type so the For You TV/Movies filters both have
     # plenty (and Load More has depth), then merge into one score-ranked list.
@@ -659,6 +663,8 @@ async def refresh_profile(profile_id: int):
                     if pick:
                         item["reason"] = pick.get("reason")
                         item["ai_endorsed"] = True
+                        # Bump base_score too so the boost survives on-read re-ranking
+                        item["base_score"] = (item.get("base_score", 0) or 0) + 10
                         item["score"] = (item.get("score", 0) or 0) + 10
                 recs["recommendations"].sort(key=lambda x: x.get("score", 0), reverse=True)
                 recs["ai_blended"] = True

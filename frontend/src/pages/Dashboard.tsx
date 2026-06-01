@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from "react";
-import { api } from "../api";
+import { api, getProfileId } from "../api";
 import MediaCard from "../components/MediaCard";
 import CustomSearch from "../components/CustomSearch";
 import DetailModal from "../components/DetailModal";
+import RecSettingsModal, { FeedStats } from "../components/RecSettingsModal";
 import { useWatched } from "../WatchedContext";
 import { useIsMobile } from "../useIsMobile";
 
@@ -67,7 +68,18 @@ function usePaged<T>(fetcher: (page: number) => Promise<T[]>, enabled: boolean) 
     }
   }
 
-  return { items, loading, loadingMore, error, hasMore, loadMore };
+  // Force a fresh fetch from page 1 (e.g. after the user retunes their feed).
+  function reload() {
+    setLoading(true);
+    setError(false);
+    setPage(1);
+    fetcher(1)
+      .then(data => { setItems(data); setHasMore(data.length >= 20); })
+      .catch(() => setError(true))
+      .finally(() => setLoading(false));
+  }
+
+  return { items, loading, loadingMore, error, hasMore, loadMore, reload };
 }
 
 // ── Genre filter bar ─────────────────────────────────────────────────────────
@@ -178,6 +190,30 @@ function GenreFilter({ items, selected, onChange }: {
   );
 }
 
+function buildFeedStats(items: any[], meta: any): FeedStats {
+  const counts: Record<string, number> = {};
+  let tv = 0, movie = 0;
+  for (const it of items) {
+    if (it.media_type === "tv") tv++;
+    else if (it.media_type === "movie") movie++;
+    for (const gid of it.genre_ids ?? []) {
+      const name = genreName(gid);
+      if (name) counts[name] = (counts[name] ?? 0) + 1;
+    }
+  }
+  const genreCounts = Object.entries(counts)
+    .sort((a, b) => b[1] - a[1])
+    .map(([name, count]) => ({ name, count }));
+  return {
+    total: items.length, tv, movie,
+    basedOn: meta?.based_on,
+    traktBlended: meta?.trakt_blended,
+    tastediveBlended: meta?.tastedive_blended,
+    aiBlended: meta?.ai_blended,
+    genreCounts,
+  };
+}
+
 function applyGenreFilter(items: any[], selected: string[]): any[] {
   if (selected.length === 0) return items;
   return items.filter(item =>
@@ -213,8 +249,9 @@ export default function Dashboard() {
   const [genreFilter, setGenreFilter] = useState<string[]>([]);
   const [forYouType, setForYouType] = useState<"all" | "tv" | "movie">("all");
   const [forYouVisible, setForYouVisible] = useState(24);  // client-side Load More
-  const [forYouMeta, setForYouMeta] = useState<{ top_genres?: string[]; based_on?: number; trakt_blended?: boolean; ai_blended?: boolean } | null>(null);
+  const [forYouMeta, setForYouMeta] = useState<{ top_genres?: string[]; based_on?: number; trakt_blended?: boolean; tastedive_blended?: boolean; ai_blended?: boolean } | null>(null);
   const [aiEnabled, setAiEnabled] = useState(true);
+  const [tuning, setTuning] = useState(false);
 
   useEffect(() => {
     api.getStatus().then(s => setAiEnabled(!!s.ai_enabled)).catch(() => {});
@@ -303,7 +340,7 @@ export default function Dashboard() {
 
           {/* For You TV/Movies sub-tabs */}
           {tab === "for-you" && active.items.length > 0 && (
-            <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
+            <div style={{ display: "flex", gap: 6, marginBottom: 14, alignItems: "center" }}>
               {([["all", "All"], ["tv", "TV Shows"], ["movie", "Films"]] as const).map(([id, label]) => (
                 <button key={id} onClick={() => setForYouType(id)} style={{
                   padding: "5px 14px", borderRadius: 20, fontSize: 12,
@@ -313,6 +350,11 @@ export default function Dashboard() {
                   fontWeight: forYouType === id ? 600 : 400, cursor: "pointer", transition: "all 0.15s",
                 }}>{label}</button>
               ))}
+              <button onClick={() => setTuning(true)} title="Tune your recommendations" style={{
+                marginLeft: "auto", padding: "5px 14px", borderRadius: 20, fontSize: 12,
+                border: "1px solid var(--border)", background: "var(--surface2)",
+                color: "var(--muted)", fontWeight: 600, cursor: "pointer", transition: "all 0.15s",
+              }}>⚙ Tune</button>
             </div>
           )}
 
@@ -356,6 +398,16 @@ export default function Dashboard() {
       {selected && (
         <DetailModal tmdbId={selected.id} mediaType={selected.mediaType}
           onClose={() => setSelected(null)} />
+      )}
+
+      {tuning && (
+        <RecSettingsModal
+          profileId={getProfileId()}
+          topGenres={forYouMeta?.top_genres}
+          stats={buildFeedStats(forYou.items, forYouMeta)}
+          onClose={() => setTuning(false)}
+          onSaved={() => forYou.reload()}
+        />
       )}
     </div>
   );
