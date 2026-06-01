@@ -5,7 +5,7 @@ import MediaCard from "../components/MediaCard";
 import DetailModal from "../components/DetailModal";
 
 export default function Watchlist() {
-  const { isWatchlisted } = useWatched();
+  const { isWatchlisted, isDismissed } = useWatched();
   const [items, setItems] = useState<Recommendation[]>([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<{ id: number; mediaType: string } | null>(null);
@@ -17,8 +17,8 @@ export default function Watchlist() {
       .finally(() => setLoading(false));
   }, []);
 
-  // Reactively drop items removed from the watchlist
-  const visible = items.filter(i => isWatchlisted(i.id));
+  // Reactively drop items removed from the watchlist or marked "not interested"
+  const visible = items.filter(i => isWatchlisted(i.id) && !isDismissed(i.id));
 
   if (loading) {
     return <div style={{ color: "var(--muted)", textAlign: "center", padding: 60 }}>Loading…</div>;
