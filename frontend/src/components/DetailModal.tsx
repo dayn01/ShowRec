@@ -73,6 +73,14 @@ export default function DetailModal({ tmdbId, mediaType, onClose }: Props) {
   const similarItems = similar?.results ?? [];
   const showSimilarSection = similarLoading || similarItems.length > 0;
 
+  // Overseerr request status. Returns { enabled:false } when Overseerr isn't
+  // configured, so the button stays hidden and the rest of the modal is unaffected.
+  const { data: reqStatus } = useQuery({
+    queryKey: ["request-status", current.mediaType, current.tmdbId],
+    queryFn: () => api.getRequestStatus(current.mediaType, current.tmdbId),
+    staleTime: 1000 * 60 * 5,
+  });
+
   // Vertical wheel → horizontal scroll for the Cast and More Like This rows.
   const castWheelRef = useHorizontalWheel<HTMLDivElement>();
   const similarWheelRef = useHorizontalWheel<HTMLDivElement>();
@@ -117,6 +125,23 @@ export default function DetailModal({ tmdbId, mediaType, onClose }: Props) {
           isWatchlisted, toggleWatchlist, dismiss, showProgress } = useWatched();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
+
+  // Local override so the button reflects a just-sent request immediately,
+  // before the status query refetches.
+  const [reqState, setReqState] = useState<"idle" | "sending" | "done" | "error">("idle");
+  useEffect(() => { setReqState("idle"); }, [current.tmdbId]);
+
+  async function requestMedia() {
+    if (!data || reqState === "sending") return;
+    setReqState("sending");
+    try {
+      await api.requestMedia(data.id, data.media_type);
+      setReqState("done");
+    } catch {
+      setReqState("error");
+      setTimeout(() => setReqState("idle"), 3000);
+    }
+  }
 
   const onWatchlist = data ? isWatchlisted(data.id) : false;
 
@@ -270,6 +295,37 @@ export default function DetailModal({ tmdbId, mediaType, onClose }: Props) {
                   >
                     ✕ Not Interested
                   </button>
+
+                  {/* Request via Overseerr — only rendered when Overseerr is configured. */}
+                  {reqStatus?.enabled && (() => {
+                    const onServer = reqStatus.status === "available";
+                    const alreadyRequested = reqState === "done" || (reqState === "idle" && reqStatus.requested);
+                    const disabled = onServer || alreadyRequested || reqState === "sending";
+                    const label =
+                      reqState === "sending" ? "Requesting…"
+                      : reqState === "error" ? "Error — try again"
+                      : onServer ? "✓ On Server"
+                      : alreadyRequested ? "✓ Requested"
+                      : "⬇ Request";
+                    return (
+                      <button
+                        onClick={requestMedia}
+                        disabled={disabled}
+                        title={onServer ? "Already available on your server" : "Request this via Overseerr"}
+                        style={{
+                          padding: "8px 16px", borderRadius: 20,
+                          border: "1px solid var(--border)", fontWeight: 600, fontSize: 13,
+                          cursor: disabled ? "default" : "pointer",
+                          background: reqState === "error" ? "var(--red)"
+                            : onServer || alreadyRequested ? "var(--green)" : "var(--surface2)",
+                          color: onServer || alreadyRequested ? "#000" : "var(--text)",
+                          transition: "background 0.2s",
+                        }}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })()}
                 </div>
 
                 {data.tagline && (

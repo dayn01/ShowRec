@@ -18,6 +18,10 @@ class Settings(BaseSettings):
     plex_url: Optional[str] = None
     plex_token: Optional[str] = None
 
+    # Overseerr — optional. When unset, the request feature stays hidden/disabled.
+    overseerr_url: Optional[str] = None
+    overseerr_api_key: Optional[str] = None
+
     ha_url: Optional[str] = None
     ha_token: Optional[str] = None
     ha_notification_service: str = "notify.notify"

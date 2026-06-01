@@ -25,6 +25,7 @@ export default function StatusBar() {
           {dot(data.trakt ? true : false, "Trakt")}
           {dot(data.tmdb ? true : false, "TMDB")}
           {data.tastedive && dot(true, "TasteDive")}
+          {data.overseerr !== null && dot(data.overseerr, "Overseerr")}
         </>
       ) : (
         <span style={{ fontSize: 12, color: "var(--muted)" }}>Checking connections…</span>

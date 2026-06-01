@@ -66,6 +66,13 @@ export interface Status {
   tmdb: boolean;
   ai_enabled: boolean;
   tastedive: boolean;
+  overseerr: boolean | null;
+}
+
+export interface RequestStatus {
+  enabled: boolean;
+  status: string;   // unknown | pending | processing | partial | available
+  requested: boolean;
 }
 
 export interface DetailedMedia {
@@ -139,6 +146,14 @@ export const api = {
     get<DetailedMedia>(`/details/${mediaType}/${tmdbId}`),
   getSimilar: (mediaType: string, tmdbId: number) =>
     get<{ enabled: boolean; results: Recommendation[] }>(`/details/${mediaType}/${tmdbId}/similar`),
+  getRequestStatus: (mediaType: string, tmdbId: number) =>
+    get<RequestStatus>(`/request/status/${mediaType}/${tmdbId}`),
+  requestMedia: (tmdbId: number, mediaType: string) =>
+    fetch(`/api/request`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Profile-Id": String(getProfileId()) },
+      body: JSON.stringify({ tmdb_id: tmdbId, media_type: mediaType }),
+    }).then(r => { if (!r.ok) throw new Error(r.statusText); return r.json() as Promise<{ ok: boolean; status: string }>; }),
   markWatched: (tmdbId: number, mediaType: string, title: string, year?: number) =>
     fetch(`/api/watched`, {
       method: "POST",

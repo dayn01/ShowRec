@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from integrations import jellyfin, plex, homeassistant
+from integrations import jellyfin, plex, homeassistant, overseerr
 from config import settings
 
 router = APIRouter(prefix="/status", tags=["status"])
@@ -10,6 +10,7 @@ async def get_status():
     jf_ok = await jellyfin.ping() if settings.jellyfin_url else None
     ha_ok = await homeassistant.ping() if settings.ha_url else None
     plex_ok = plex.ping() if settings.plex_url else None
+    overseerr_ok = await overseerr.ping() if overseerr.is_configured() else None
 
     trakt_configured = bool(settings.trakt_client_id and settings.trakt_access_token)
     tmdb_configured = bool(settings.tmdb_api_key)
@@ -23,4 +24,5 @@ async def get_status():
         "tmdb": tmdb_configured,
         "ai_enabled": ai_enabled,
         "tastedive": bool(settings.tastedive_api_key),
+        "overseerr": overseerr_ok,
     }

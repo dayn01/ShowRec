@@ -1,7 +1,9 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from contextlib import asynccontextmanager
-from routers import recommendations, upcoming, status, details, watched, ai_recommendations, library, profiles
+from pathlib import Path
+from routers import recommendations, upcoming, status, details, watched, ai_recommendations, library, profiles, requests
 import scheduler
 import prefetch
 import database
@@ -41,19 +43,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(recommendations.router)
-app.include_router(upcoming.router)
-app.include_router(status.router)
-app.include_router(details.router)
-app.include_router(watched.router)
-app.include_router(ai_recommendations.router)
-app.include_router(library.router)
-app.include_router(profiles.router)
+_routers = (recommendations, upcoming, status, details, watched,
+            ai_recommendations, library, profiles, requests)
 
+# Root paths (e.g. /watched) — used by the Vite dev server and the Docker nginx,
+# both of which strip the /api prefix before forwarding here.
+for _r in _routers:
+    app.include_router(_r.router)
 
-@app.get("/")
-def root():
-    return {"message": "Show Recommendation API", "docs": "/docs"}
+# Mirror every router under /api so a single uvicorn process can serve both the
+# API and the built frontend with no reverse proxy (native / Raspberry Pi deploy).
+for _r in _routers:
+    app.include_router(_r.router, prefix="/api")
 
 
 @app.post("/cache/refresh")
@@ -67,3 +68,26 @@ async def manual_refresh():
 async def cache_status():
     """Show what's in the SQLite cache and how old it is."""
     return await database.get_cache_stats()
+
+
+# Serve the built single-page app when frontend/dist exists (produced by
+# `npm run build`). With no build present we fall back to the JSON API root so
+# the dev server / Docker setup are unaffected.
+FRONTEND_DIST = (Path(__file__).parent.parent / "frontend" / "dist").resolve()
+
+if FRONTEND_DIST.is_dir():
+    @app.get("/{full_path:path}")
+    async def serve_spa(full_path: str):
+        # Never let the SPA fallback swallow an unmatched API/cache call.
+        if full_path.startswith(("api/", "cache/")):
+            raise HTTPException(status_code=404)
+        candidate = (FRONTEND_DIST / full_path).resolve()
+        # Serve a real build artifact (JS/CSS/images) when one exists…
+        if full_path and FRONTEND_DIST in candidate.parents and candidate.is_file():
+            return FileResponse(candidate)
+        # …otherwise hand back index.html so client-side routing works.
+        return FileResponse(FRONTEND_DIST / "index.html")
+else:
+    @app.get("/")
+    def root():
+        return {"message": "Show Recommendation API", "docs": "/docs"}

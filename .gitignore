@@ -3,6 +3,9 @@
 showrec_cache.db
 data/
 
+# Personal server-side setup — kept local, not part of the shareable app
+arr-stack/
+
 # Python
 backend/venv/
 __pycache__/
