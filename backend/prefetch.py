@@ -306,6 +306,7 @@ async def _build_recommendations(history: list[dict], profile_id: int = 1) -> di
         "recommendations": results_sorted,
         "based_on": len(watched_ids),
         "top_genres": top_genres,
+        "genre_affinity": dict(genre_affinity),   # name -> weight, for search ranking
         "trakt_blended": bool(settings.trakt_access_token),
         "tastedive_blended": tastedive.enabled(),
     }

@@ -2,45 +2,144 @@
 from fastapi import APIRouter, Query, HTTPException, Depends
 from pydantic import BaseModel
 from integrations import tmdb
-from deps import get_profile_id
+from deps import get_profile_id, pkey
 from config import settings
 import database
 import asyncio
 import concurrent.futures
+import re
 
 router = APIRouter(tags=["library"])
 
 
 # ── Search ────────────────────────────────────────────────────────────────────
 
+# Trailing year, optionally parenthesised: "Dune 2021", "Inception (2010)".
+_TRAILING_YEAR = re.compile(r"[\(\[]?\b((?:19|20)\d{2})\b[\)\]]?\s*$")
+
+
+def _shape_result(item: dict, search_type: str) -> dict | None:
+    mt = item.get("media_type") or ("tv" if search_type == "tv" else "movie")
+    if mt not in ("tv", "movie"):
+        return None  # skip people etc.
+    return {
+        "id": item.get("id"),
+        "title": item.get("title") or item.get("name"),
+        "name": item.get("name"),
+        "overview": item.get("overview", ""),
+        "poster_url": tmdb.poster_url(item.get("poster_path")),
+        "vote_average": item.get("vote_average", 0),
+        "media_type": mt,
+        "genre_ids": item.get("genre_ids", []),
+        "release_date": item.get("release_date"),
+        "first_air_date": item.get("first_air_date"),
+        "popularity": item.get("popularity", 0),
+    }
+
+
+def _relevance(title: str, query_lc: str) -> int:
+    """Title-match strength against the query (higher = better)."""
+    t = (title or "").lower()
+    if not t:
+        return 0
+    if t == query_lc:
+        return 1000
+    if t.startswith(query_lc):
+        return 500
+    if query_lc in t:
+        return 250
+    # token overlap for word-order / partial-word differences
+    overlap = len(set(query_lc.split()) & set(t.split()))
+    return 100 * overlap
+
+
+async def _search_with_fallback(q: str, search_type: str) -> list[dict]:
+    """TMDB search, retrying with the trailing word dropped if nothing matches."""
+    raw = await tmdb.search(q, search_type)
+    if raw:
+        return raw
+    words = q.split()
+    if len(words) > 1:
+        raw = await tmdb.search(" ".join(words[:-1]), search_type)
+    return raw
+
+
 @router.get("/search")
-async def search(q: str = Query(..., min_length=1), type: str = Query("multi", pattern="^(multi|tv|movie)$")):
-    """Search TMDB for titles. Returns MediaCard-shaped results."""
+async def search(q: str = Query(..., min_length=1), type: str = Query("multi", pattern="^(multi|tv|movie)$"),
+                 pid: int = Depends(get_profile_id)):
+    """Search TMDB for titles. Returns MediaCard-shaped results.
+
+    Forgiving: collapses whitespace, strips a trailing year (used to rank the
+    right edition up), retries with the last word dropped when empty, and ranks
+    by title-match relevance first, then by closeness to the profile's taste
+    (genre affinity + tuning weights), then popularity.
+    """
+    q = " ".join(q.split())  # normalise whitespace
+    if not q:
+        return {"results": []}
+
+    year = None
+    clean = q
+    m = _TRAILING_YEAR.search(q)
+    if m:
+        year = m.group(1)
+        stripped = q[:m.start()].strip()
+        if stripped:           # don't blank the query if the year was all of it
+            clean = stripped
+
     try:
-        raw = await tmdb.search(q, type)
+        raw = await _search_with_fallback(clean, type)
     except Exception as e:
         raise HTTPException(502, f"TMDB search failed: {e}")
 
-    results = []
+    # Rank against the original query (incl. any year) so titles that genuinely
+    # contain a number — "Blade Runner 2049", "1917" — still match exactly.
+    query_lc = q.lower()
+    results: list[dict] = []
+    seen: set[tuple] = set()
     for item in raw:
-        mt = item.get("media_type") or ("tv" if type == "tv" else "movie")
-        if mt not in ("tv", "movie"):
-            continue  # skip people etc.
-        results.append({
-            "id": item.get("id"),
-            "title": item.get("title") or item.get("name"),
-            "name": item.get("name"),
-            "overview": item.get("overview", ""),
-            "poster_url": tmdb.poster_url(item.get("poster_path")),
-            "vote_average": item.get("vote_average", 0),
-            "media_type": mt,
-            "genre_ids": item.get("genre_ids", []),
-            "release_date": item.get("release_date"),
-            "first_air_date": item.get("first_air_date"),
-            "popularity": item.get("popularity", 0),
-        })
-    # Most relevant/popular first
-    results.sort(key=lambda x: x.get("popularity", 0), reverse=True)
+        shaped = _shape_result(item, type)
+        if not shaped:
+            continue
+        if type != "multi" and shaped["media_type"] != type:
+            continue  # keep type integrity even when a fallback broadens results
+        key = (shaped["media_type"], shaped["id"])
+        if key in seen:
+            continue
+        seen.add(key)
+        results.append(shaped)
+
+    # Personalisation: within a relevance bucket, prefer titles closer to the
+    # profile's taste (genre affinity, scaled + reweighted by the Tune settings),
+    # then popularity. Relevance stays primary so exact matches never get buried.
+    from prefetch import GENRE_MAP  # lazy import avoids a circular import at load
+    rec_settings = await database.get_rec_settings(pid)
+    genre_weight = rec_settings.get("genre_weight", 1.0)
+    multipliers = rec_settings.get("genre_multipliers") or {}
+    cached_recs = await database.cache_get(pkey(pid, "recommendations"), "recommendations")
+    affinity = (cached_recs or {}).get("genre_affinity") or {}
+    max_aff = max(affinity.values()) if affinity else 1
+
+    def taste_factor(r: dict) -> float:
+        taste, factor = 0.0, 1.0
+        for gid in r.get("genre_ids", []):
+            name = GENRE_MAP.get(gid)
+            if not name:
+                continue
+            if affinity:
+                taste += affinity.get(name, 0) / max_aff   # 0..1 per matching genre
+            mult = multipliers.get(name)
+            if mult is not None:
+                factor *= mult                              # tuning: boost / damp / hide
+        return (1 + taste * genre_weight) * factor
+
+    def sort_key(r: dict):
+        rel = _relevance(r.get("title") or "", query_lc)
+        if year and (r.get("release_date") or r.get("first_air_date") or "")[:4] == year:
+            rel += 300  # boost the matching-year edition
+        return (rel, (r.get("popularity", 0) + 1) * taste_factor(r))
+
+    results.sort(key=sort_key, reverse=True)
     return {"results": results}
 
 
