@@ -62,22 +62,16 @@ export default function DetailModal({ tmdbId, mediaType, onClose }: Props) {
     staleTime: 1000 * 60 * 60 * 6, // trust cache for 6h
   });
 
-  // Only attempt similar lookups when a TasteDive key is configured.
-  const { data: status } = useQuery({
-    queryKey: ["status"], queryFn: api.getStatus, staleTime: 1000 * 60 * 5,
-  });
-  const tasteDive = !!status?.tastedive;
-
   // Fire in parallel with the details query (it resolves the title server-side),
-  // so the section starts loading the moment the modal opens.
+  // so the section starts loading the moment the modal opens. The backend prefers
+  // TasteDive and falls back to TMDB, so this populates for essentially any title.
   const { data: similar, isLoading: similarLoading } = useQuery({
     queryKey: ["similar", current.mediaType, current.tmdbId],
     queryFn: () => api.getSimilar(current.mediaType, current.tmdbId),
     staleTime: 1000 * 60 * 60 * 6,
-    enabled: tasteDive,
   });
   const similarItems = similar?.results ?? [];
-  const showSimilarSection = tasteDive && (similarLoading || similarItems.length > 0);
+  const showSimilarSection = similarLoading || similarItems.length > 0;
 
   // Vertical wheel → horizontal scroll for the Cast and More Like This rows.
   const castWheelRef = useHorizontalWheel<HTMLDivElement>();

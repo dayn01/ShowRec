@@ -14,15 +14,11 @@ export default function Search() {
   const [selected, setSelected] = useState<{ id: number; mediaType: string } | null>(null);
   const debounce = useRef<number | undefined>(undefined);
 
-  // "Similar to" discovery (TasteDive). Works without the AI Custom Search.
-  const [tasteDive, setTasteDive] = useState(false);
+  // "Similar to" discovery — works without the AI Custom Search (TasteDive when a
+  // key is set, otherwise TMDB's own recommendations).
   const [similarFor, setSimilarFor] = useState<Recommendation | null>(null);
   const [similarItems, setSimilarItems] = useState<Recommendation[]>([]);
   const [similarLoading, setSimilarLoading] = useState(false);
-
-  useEffect(() => {
-    api.getStatus().then(s => setTasteDive(!!s.tastedive)).catch(() => {});
-  }, []);
 
   async function showSimilar(item: Recommendation) {
     setSimilarFor(item);
@@ -121,7 +117,7 @@ export default function Search() {
             {similarItems.map(item => (
               <MediaCard key={`${item.media_type}-${item.id}`} item={item}
                 onClick={() => setSelected({ id: item.id, mediaType: item.media_type })}
-                onSimilar={tasteDive ? () => showSimilar(item) : undefined} />
+                onSimilar={() => showSimilar(item)} />
             ))}
           </div>
         </div>
@@ -149,7 +145,7 @@ export default function Search() {
             {results.map(item => (
               <MediaCard key={`${item.media_type}-${item.id}`} item={item}
                 onClick={() => setSelected({ id: item.id, mediaType: item.media_type })}
-                onSimilar={tasteDive ? () => showSimilar(item) : undefined} />
+                onSimilar={() => showSimilar(item)} />
             ))}
           </div>
         </>
