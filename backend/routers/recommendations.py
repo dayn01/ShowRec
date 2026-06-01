@@ -32,6 +32,7 @@ async def get_recs(limit: int = Query(40, le=200), page: int = Query(1, ge=1),
             "based_on": cached.get("based_on", 0),
             "top_genres": cached.get("top_genres", []),
             "trakt_blended": cached.get("trakt_blended", False),
+            "tastedive_blended": cached.get("tastedive_blended", False),
             "total": len(recs),
             "from_cache": True,
         }

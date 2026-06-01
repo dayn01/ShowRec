@@ -121,7 +121,7 @@ export const api = {
       candidates_analysed: number;
     }>("/ai-recommendations"),
   getRecommendations: (limit = 30) =>
-    get<{ recommendations: Recommendation[]; based_on: number; top_genres?: string[]; trakt_blended?: boolean }>(
+    get<{ recommendations: Recommendation[]; based_on: number; top_genres?: string[]; trakt_blended?: boolean; tastedive_blended?: boolean }>(
       `/recommendations?limit=${limit}`
     ),
   getTrending: (type: "shows" | "movies" = "shows", page = 1) =>

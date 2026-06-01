@@ -6,10 +6,10 @@ import asyncio
 import concurrent.futures
 import logging
 import database
-from integrations import trakt, tmdb, reddit, jellyfin
+from integrations import trakt, tmdb, reddit, jellyfin, tastedive
 from integrations.claude import get_ai_recommendations
 from routers.recommendations import _gather_history
-from routers.details import _fetch_and_cache_show, _fetch_and_cache_season
+from routers.details import _fetch_and_cache_show, _fetch_and_cache_season, _resolve_tastedive_item
 from config import settings
 
 logger = logging.getLogger(__name__)
@@ -73,6 +73,42 @@ async def _build_taste_profile(watched: list[dict]) -> dict:
             absorb(data)
 
     return {"genres": genres, "keywords": keywords, "people": people}
+
+
+async def _tastedive_candidates(history: list[dict], sample_per_type: int = 6,
+                                per_title: int = 8, max_resolve: int = 60) -> list[dict]:
+    """
+    TasteDive 'people who like X also like…' candidates for the recommender.
+    Samples recently-watched titles, asks TasteDive for similar titles, then
+    resolves the suggested names back to TMDB items. Returns [] without a key.
+    """
+    if not tastedive.enabled():
+        return []
+
+    titled = [h for h in history if h.get("title")]
+    tv = [h for h in titled if h.get("media_type") == "tv"][:sample_per_type]
+    movie = [h for h in titled if h.get("media_type") == "movie"][:sample_per_type]
+
+    async def fetch(h):
+        try:
+            return await tastedive.get_similar(h["title"], h["media_type"], limit=per_title)
+        except Exception:
+            return []
+
+    suggestion_lists = await asyncio.gather(*[fetch(h) for h in tv + movie])
+
+    # Dedup suggestions by (name, type) so we don't resolve the same title twice.
+    uniq: dict[tuple, dict] = {}
+    for lst in suggestion_lists:
+        for s in lst:
+            name = s.get("name")
+            key = (name.lower() if name else "", s.get("type"))
+            if name and key not in uniq:
+                uniq[key] = s
+
+    suggestions = list(uniq.values())[:max_resolve]
+    resolved = await asyncio.gather(*[_resolve_tastedive_item(s, 0) for s in suggestions])
+    return [r for r in resolved if r]
 
 
 async def _build_recommendations(history: list[dict], profile_id: int = 1) -> dict | None:
@@ -212,12 +248,34 @@ async def _build_recommendations(history: list[dict], profile_id: int = 1) -> di
                     "_genre": 0, "_freq": 0, "_trakt": 0, "_taste": taste_boost,
                 }
 
+    # ── TasteDive: "people who like what you watch also like…" (if a key is set).
+    #    A curated similarity signal that complements TMDB's own recommendations.
+    for item in await _tastedive_candidates(history):
+        iid = item.get("id")
+        if not iid or iid in seen_ids:
+            continue
+        if iid in scored:
+            scored[iid]["_tastedive"] = scored[iid].get("_tastedive", 0) + 3
+        else:
+            genre_score = 0
+            for gid in item.get("genre_ids", []):
+                name = GENRE_MAP.get(gid)
+                if name and name in genre_affinity:
+                    genre_score += (genre_affinity[name] / max_genre) * 5
+            scored[iid] = {
+                **item,
+                "_quality": item.get("vote_average", 0) or 0,
+                "_genre": genre_score,
+                "_freq": 0, "_trakt": 0, "_taste": 0, "_tastedive": 3,
+            }
+
     # Final weighted score
     for item in scored.values():
         item["score"] = round(
             item["_freq"] * 3.0          # how often recommended across your library
             + item["_genre"]             # genre affinity match
             + item.get("_taste", 0)      # theme/actor taste match (discover)
+            + item.get("_tastedive", 0)  # TasteDive 'also like' similarity
             + item["_quality"] * 0.8     # overall quality
             + item["_trakt"],            # Trakt personal endorsement
             2,
@@ -232,7 +290,7 @@ async def _build_recommendations(history: list[dict], profile_id: int = 1) -> di
 
     # Strip internal scoring fields before caching
     for item in results_sorted:
-        for k in ("_quality", "_genre", "_freq", "_trakt", "_taste"):
+        for k in ("_quality", "_genre", "_freq", "_trakt", "_taste", "_tastedive"):
             item.pop(k, None)
 
     top_genres = [g for g, _ in genre_affinity.most_common(5)]
@@ -241,6 +299,7 @@ async def _build_recommendations(history: list[dict], profile_id: int = 1) -> di
         "based_on": len(watched_ids),
         "top_genres": top_genres,
         "trakt_blended": bool(settings.trakt_access_token),
+        "tastedive_blended": tastedive.enabled(),
     }
 
 

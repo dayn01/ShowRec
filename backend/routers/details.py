@@ -138,6 +138,7 @@ async def _resolve_tastedive_item(item: dict, exclude_id: int) -> dict | None:
         "overview": r.get("overview") or "",
         "poster_url": tmdb.poster_url(r.get("poster_path")),
         "vote_average": r.get("vote_average") or 0,
+        "genre_ids": r.get("genre_ids", []),
         "release_date": r.get("release_date"),
         "first_air_date": r.get("first_air_date"),
     }
