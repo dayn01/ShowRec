@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Recommendation, api } from "../api";
 import { useWatched } from "../WatchedContext";
+import { useIsMobile } from "../useIsMobile";
 
 // Jellyseerr/Overseerr availability → badge appearance. Absent status = no badge.
 const REQUEST_BADGES: Record<string, { label: string; bg: string; color: string }> = {
@@ -47,6 +48,9 @@ export default function MediaCard({ item, onClick, onMarkedSeen, fading, onSimil
   const reqBadge = reqStatuses?.enabled
     ? REQUEST_BADGES[reqStatuses.statuses[item.id]]
     : undefined;
+  // On mobile the poster corner is crowded → show the badge in the content area
+  // (where the description blurb is hidden) instead.
+  const isMobile = useIsMobile();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
 
@@ -135,8 +139,9 @@ export default function MediaCard({ item, onClick, onMarkedSeen, fading, onSimil
             padding: "2px 8px", fontSize: 10, fontWeight: 700, color: "#fff",
           }}>✨ AI Pick</div>
         )}
-        {/* Jellyseerr/Overseerr status: requested/downloading → flips to ✓ when in library */}
-        {reqBadge && (
+        {/* Jellyseerr/Overseerr status: requested/downloading → flips to ✓ when in library.
+            Desktop: poster corner. Mobile: moved to the content area below (less crowded). */}
+        {!isMobile && reqBadge && (
           <div style={{
             position: "absolute", top: item.ai_endorsed ? 60 : 34, left: 8,
             background: reqBadge.bg, borderRadius: 20,
@@ -215,6 +220,14 @@ export default function MediaCard({ item, onClick, onMarkedSeen, fading, onSimil
           }}>
             {item.overview || "No description available."}
           </div>
+        )}
+        {/* Mobile: availability badge sits where the (hidden) blurb was, bottom-centered. */}
+        {isMobile && reqBadge && (
+          <div style={{
+            marginTop: "auto", alignSelf: "center",
+            background: reqBadge.bg, borderRadius: 20,
+            padding: "3px 12px", fontSize: 11, fontWeight: 700, color: reqBadge.color,
+          }}>{reqBadge.label}</div>
         )}
       </div>
     </div>
