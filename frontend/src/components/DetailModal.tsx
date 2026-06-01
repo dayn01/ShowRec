@@ -40,13 +40,22 @@ export default function DetailModal({ tmdbId, mediaType, onClose }: Props) {
     staleTime: 1000 * 60 * 60 * 6, // trust cache for 6h
   });
 
-  const { data: similar } = useQuery({
+  // Only attempt similar lookups when a TasteDive key is configured.
+  const { data: status } = useQuery({
+    queryKey: ["status"], queryFn: api.getStatus, staleTime: 1000 * 60 * 5,
+  });
+  const tasteDive = !!status?.tastedive;
+
+  // Fire in parallel with the details query (it resolves the title server-side),
+  // so the section starts loading the moment the modal opens.
+  const { data: similar, isLoading: similarLoading } = useQuery({
     queryKey: ["similar", current.mediaType, current.tmdbId],
     queryFn: () => api.getSimilar(current.mediaType, current.tmdbId),
     staleTime: 1000 * 60 * 60 * 6,
-    enabled: !!data,
+    enabled: tasteDive,
   });
   const similarItems = similar?.results ?? [];
+  const showSimilarSection = tasteDive && (similarLoading || similarItems.length > 0);
 
   // Auto-expand the current/latest season and trigger background season prefetch
   const [autoExpandSeason, setAutoExpandSeason] = useState<number | null>(null);
@@ -346,13 +355,20 @@ export default function DetailModal({ tmdbId, mediaType, onClose }: Props) {
             )}
 
             {/* More Like This — TasteDive similar titles (only when an API key is set) */}
-            {similarItems.length > 0 && (
+            {showSimilarSection && (
               <div style={{ padding: "0 24px 24px" }}>
                 <h3 style={{ fontSize: 15, fontWeight: 600, marginBottom: 12, color: "var(--accent2)" }}>
                   More Like This
                 </h3>
                 <div style={{ display: "flex", gap: 12, overflowX: "auto", paddingBottom: 8 }}>
-                  {similarItems.map(item => {
+                  {similarLoading && similarItems.length === 0
+                    ? Array.from({ length: 8 }).map((_, i) => (
+                        <div key={`sk-${i}`} style={{ flexShrink: 0, width: 110 }}>
+                          <div className="skeleton" style={{ width: 110, height: 165, borderRadius: 8 }} />
+                          <div className="skeleton" style={{ width: "80%", height: 12, marginTop: 6, borderRadius: 4 }} />
+                        </div>
+                      ))
+                    : similarItems.map(item => {
                     const simScore = Math.round((item.vote_average || 0) * 10);
                     return (
                       <div
