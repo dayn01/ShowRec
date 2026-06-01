@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     anthropic_api_key: Optional[str] = None
     reddit_client_id: Optional[str] = None
     reddit_client_secret: Optional[str] = None
+    tastedive_api_key: Optional[str] = None
 
     class Config:
         env_file = str(ENV_FILE)

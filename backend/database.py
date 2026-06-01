@@ -19,6 +19,7 @@ TTL = {
     "trending":        21600,       # 6h
     "ai_picks":        86400,       # 24h (expensive)
     "upcoming":        3600,        # 1h
+    "similar":         86400,       # 24h (TasteDive + TMDB resolution)
 }
 
 

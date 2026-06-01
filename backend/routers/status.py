@@ -22,4 +22,5 @@ async def get_status():
         "trakt": trakt_configured,
         "tmdb": tmdb_configured,
         "ai_enabled": ai_enabled,
+        "tastedive": bool(settings.tastedive_api_key),
     }

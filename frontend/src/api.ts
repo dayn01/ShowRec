@@ -60,6 +60,7 @@ export interface Status {
   trakt: boolean;
   tmdb: boolean;
   ai_enabled: boolean;
+  tastedive: boolean;
 }
 
 export interface DetailedMedia {
@@ -131,6 +132,8 @@ export const api = {
   getStatus: () => get<Status>("/status"),
   getDetails: (mediaType: string, tmdbId: number) =>
     get<DetailedMedia>(`/details/${mediaType}/${tmdbId}`),
+  getSimilar: (mediaType: string, tmdbId: number) =>
+    get<{ enabled: boolean; results: Recommendation[] }>(`/details/${mediaType}/${tmdbId}/similar`),
   markWatched: (tmdbId: number, mediaType: string, title: string, year?: number) =>
     fetch(`/api/watched`, {
       method: "POST",

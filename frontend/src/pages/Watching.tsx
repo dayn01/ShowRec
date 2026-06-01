@@ -15,6 +15,14 @@ interface ShowDetail {
   networks: string[];
   overview: string;
   vote_average: number;
+  seasons?: {
+    season_number: number;
+    name: string;
+    episode_count: number;
+    air_date?: string;
+    poster_url: string | null;
+    overview?: string;
+  }[];
 }
 
 export default function Watching() {

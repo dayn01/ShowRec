@@ -68,6 +68,10 @@ TRAKT_ACCESS_TOKEN=...
 # Optional — AI picks (pay-as-you-go). Leave blank to disable AI entirely.
 ANTHROPIC_API_KEY=...
 
+# Optional — TasteDive: adds a "More Like This" row of similar titles when you
+# open a show/film's details. Leave blank to hide it.
+TASTEDIVE_API_KEY=...
+
 # Optional — Home Assistant episode notifications (use a LAN IP, not .local)
 HA_URL=http://192.168.1.10:8123
 HA_TOKEN=...
@@ -87,6 +91,9 @@ HA_NOTIFICATION_SERVICE=notify.mobile_app_yourphone
   device-code helper). Trakt is **optional** — Jellyfin/Plex alone work fine.
 - **Anthropic:** <https://platform.anthropic.com> → API Keys. Pay-as-you-go; a few
   cents per refresh. Omit it and the app simply hides the AI features.
+- **TasteDive:** sign in at <https://tastedive.com/account/api_access> and copy
+  your free API key. Powers the "More Like This" suggestions on the details
+  screen; omit it and that row just doesn't appear.
 </details>
 
 > 💡 **Jellyfin/Plex/HA URLs must be reachable from inside Docker.** Use the
@@ -193,6 +200,9 @@ recommendations and shows up as watched.
   button).
 - **AI is optional** — with no `ANTHROPIC_API_KEY` the app runs purely on
   TMDB + your media server, and the AI features are hidden.
+- **TasteDive is optional** — with a `TASTEDIVE_API_KEY` set, opening a title's
+  details shows a "More Like This" row of similar shows/films (each clickable to
+  open its own details); without a key the row is hidden.
 
 ## Troubleshooting
 

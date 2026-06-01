@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException
-from integrations import tmdb
+from integrations import tmdb, tastedive
+import asyncio
 import database
 
 router = APIRouter(prefix="/details", tags=["details"])
@@ -113,6 +114,75 @@ async def get_details(media_type: str, tmdb_id: int):
         return await _fetch_and_cache_show(tmdb_id, media_type)
     except Exception as e:
         raise HTTPException(502, f"TMDB error: {e}")
+
+
+async def _resolve_tastedive_item(item: dict, exclude_id: int) -> dict | None:
+    """Resolve a TasteDive {name, type} suggestion to a TMDB item (for poster/score/id)."""
+    name = item.get("name")
+    media_type = "tv" if item.get("type") == "show" else "movie"
+    if not name:
+        return None
+    try:
+        results = await tmdb.search(name, media_type)
+    except Exception:
+        return None
+    if not results:
+        return None
+    r = results[0]
+    if not r.get("id") or r["id"] == exclude_id:
+        return None
+    return {
+        "id": r["id"],
+        "title": r.get("title") or r.get("name"),
+        "media_type": media_type,
+        "overview": r.get("overview") or "",
+        "poster_url": tmdb.poster_url(r.get("poster_path")),
+        "vote_average": r.get("vote_average") or 0,
+        "release_date": r.get("release_date"),
+        "first_air_date": r.get("first_air_date"),
+    }
+
+
+@router.get("/{media_type}/{tmdb_id}/similar")
+async def get_similar(media_type: str, tmdb_id: int, limit: int = 12):
+    """'People who like X also like…' — TasteDive suggestions resolved to TMDB items.
+
+    Returns {enabled, results}. enabled is False when no TasteDive API key is set.
+    """
+    if media_type not in ("tv", "movie"):
+        raise HTTPException(400, "media_type must be 'tv' or 'movie'")
+    if not tastedive.enabled():
+        return {"enabled": False, "results": []}
+
+    cache_key = f"similar:{media_type}:{tmdb_id}"
+    cached = await database.cache_get(cache_key, "similar")
+    if cached is not None:
+        return {"enabled": True, "results": cached}
+
+    # We need the title to query TasteDive — reuse the cached show or fetch it.
+    show = await database.get_show(tmdb_id)
+    if not show:
+        try:
+            show = await _fetch_and_cache_show(tmdb_id, media_type)
+        except Exception as e:
+            raise HTTPException(502, f"TMDB error: {e}")
+    title = show.get("title") or show.get("name")
+    if not title:
+        return {"enabled": True, "results": []}
+
+    suggestions = await tastedive.get_similar(title, media_type, limit=limit)
+    resolved = await asyncio.gather(
+        *(_resolve_tastedive_item(s, tmdb_id) for s in suggestions)
+    )
+
+    results, seen = [], set()
+    for r in resolved:
+        if r and r["id"] not in seen:
+            seen.add(r["id"])
+            results.append(r)
+
+    await database.cache_set(cache_key, results)
+    return {"enabled": True, "results": results}
 
 
 @router.get("/tv/{tmdb_id}/season/{season_number}")

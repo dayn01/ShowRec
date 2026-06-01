@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { api, DetailedMedia } from "../api";
+import { api, DetailedMedia, Recommendation } from "../api";
 import SeasonRow from "./SeasonRow";
 import { useWatched } from "../WatchedContext";
 
@@ -30,16 +30,28 @@ interface Props {
 }
 
 export default function DetailModal({ tmdbId, mediaType, onClose }: Props) {
+  // Track the currently-shown title so "More Like This" can navigate within the modal.
+  const [current, setCurrent] = useState({ tmdbId, mediaType });
+  useEffect(() => { setCurrent({ tmdbId, mediaType }); }, [tmdbId, mediaType]);
+
   const { data, isLoading, isError } = useQuery({
-    queryKey: ["details", mediaType, tmdbId],
-    queryFn: () => api.getDetails(mediaType, tmdbId),
+    queryKey: ["details", current.mediaType, current.tmdbId],
+    queryFn: () => api.getDetails(current.mediaType, current.tmdbId),
     staleTime: 1000 * 60 * 60 * 6, // trust cache for 6h
   });
+
+  const { data: similar } = useQuery({
+    queryKey: ["similar", current.mediaType, current.tmdbId],
+    queryFn: () => api.getSimilar(current.mediaType, current.tmdbId),
+    staleTime: 1000 * 60 * 60 * 6,
+    enabled: !!data,
+  });
+  const similarItems = similar?.results ?? [];
 
   // Auto-expand the current/latest season and trigger background season prefetch
   const [autoExpandSeason, setAutoExpandSeason] = useState<number | null>(null);
   useEffect(() => {
-    if (!data || mediaType !== "tv" || !data.seasons?.length) return;
+    if (!data || current.mediaType !== "tv" || !data.seasons?.length) return;
     // Seed TMDB episode counts into context so watched logic is accurate
     initSeasonTotals(data.id, data.seasons);
     // Auto-expand the last aired season
@@ -48,8 +60,16 @@ export default function DetailModal({ tmdbId, mediaType, onClose }: Props) {
     const target = airedSeasons[airedSeasons.length - 1] ?? data.seasons[0];
     if (target) setAutoExpandSeason(target.season_number);
     // Trigger background prefetch of all seasons into SQLite
-    fetch(`/api/details/tv/${tmdbId}/prefetch-seasons`, { method: "POST" }).catch(() => {});
+    fetch(`/api/details/tv/${current.tmdbId}/prefetch-seasons`, { method: "POST" }).catch(() => {});
   }, [data?.id]);
+
+  // Navigate the modal to a similar title (scroll back to top).
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  function openSimilar(item: Recommendation) {
+    setAutoExpandSeason(null);
+    setCurrent({ tmdbId: item.id, mediaType: item.media_type });
+    scrollRef.current?.scrollTo({ top: 0 });
+  }
 
   // Close on Escape
   useEffect(() => {
@@ -153,7 +173,7 @@ export default function DetailModal({ tmdbId, mediaType, onClose }: Props) {
         )}
 
         {data && (
-          <div style={{ overflowY: "auto" }}>
+          <div ref={scrollRef} style={{ overflowY: "auto" }}>
             {/* Backdrop */}
             {data.backdrop_url && (
               <div style={{ position: "relative", height: 220, overflow: "hidden" }}>
@@ -321,6 +341,48 @@ export default function DetailModal({ tmdbId, mediaType, onClose }: Props) {
                       <div style={{ fontSize: 10, color: "var(--muted)", lineHeight: 1.2 }}>{c.character}</div>
                     </div>
                   ))}
+                </div>
+              </div>
+            )}
+
+            {/* More Like This — TasteDive similar titles (only when an API key is set) */}
+            {similarItems.length > 0 && (
+              <div style={{ padding: "0 24px 24px" }}>
+                <h3 style={{ fontSize: 15, fontWeight: 600, marginBottom: 12, color: "var(--accent2)" }}>
+                  More Like This
+                </h3>
+                <div style={{ display: "flex", gap: 12, overflowX: "auto", paddingBottom: 8 }}>
+                  {similarItems.map(item => {
+                    const simScore = Math.round((item.vote_average || 0) * 10);
+                    return (
+                      <div
+                        key={`${item.media_type}-${item.id}`}
+                        onClick={() => openSimilar(item)}
+                        title={item.title || item.name}
+                        style={{ flexShrink: 0, width: 110, cursor: "pointer" }}
+                      >
+                        <div style={{ position: "relative" }}>
+                          <img
+                            src={item.poster_url || PLACEHOLDER}
+                            alt={item.title || item.name}
+                            style={{ width: 110, height: 165, objectFit: "cover", borderRadius: 8, border: "1px solid var(--border)" }}
+                            onError={e => { (e.target as HTMLImageElement).src = PLACEHOLDER; }}
+                          />
+                          {simScore > 0 && (
+                            <div style={{
+                              position: "absolute", top: 6, right: 6,
+                              background: "rgba(0,0,0,0.75)", borderRadius: 12,
+                              padding: "1px 6px", fontSize: 11, fontWeight: 700,
+                              color: simScore >= 75 ? "var(--green)" : simScore >= 55 ? "var(--yellow)" : "var(--red)",
+                            }}>{simScore}%</div>
+                          )}
+                        </div>
+                        <div style={{ fontSize: 12, fontWeight: 600, marginTop: 4, lineHeight: 1.3 }}>
+                          {item.title || item.name}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}

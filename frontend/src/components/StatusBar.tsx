@@ -24,6 +24,7 @@ export default function StatusBar() {
           {dot(data.home_assistant, "Home Assistant")}
           {dot(data.trakt ? true : false, "Trakt")}
           {dot(data.tmdb ? true : false, "TMDB")}
+          {data.tastedive && dot(true, "TasteDive")}
         </>
       ) : (
         <span style={{ fontSize: 12, color: "var(--muted)" }}>Checking connections…</span>
