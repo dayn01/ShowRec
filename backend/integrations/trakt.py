@@ -5,14 +5,15 @@ from config import settings
 BASE = "https://api.trakt.tv"
 
 
-def _headers() -> dict:
+def _headers(token: str | None = None) -> dict:
     h = {
         "Content-Type": "application/json",
         "trakt-api-version": "2",
         "trakt-api-key": settings.trakt_client_id,
     }
-    if settings.trakt_access_token:
-        h["Authorization"] = f"Bearer {settings.trakt_access_token}"
+    tok = token or settings.trakt_access_token
+    if tok:
+        h["Authorization"] = f"Bearer {tok}"
     return h
 
 
@@ -85,15 +86,21 @@ async def get_all_watched_shows(min_plays: int = 3) -> list[dict]:
         return [s for s in data if s.get("plays", 0) >= min_plays]
 
 
-async def get_personal_recommendations(media_type: str = "shows", limit: int = 30) -> list[dict]:
-    """Trakt's personalised recommendations (requires auth). Returns [] if unavailable."""
-    if not settings.trakt_access_token:
+async def get_personal_recommendations(media_type: str = "shows", limit: int = 30,
+                                       token: str | None = None) -> list[dict]:
+    """Trakt's personalised recommendations for a specific user's token.
+
+    The token must be passed explicitly (a profile's own Trakt token) — this does
+    NOT fall back to the global owner token, so profiles don't leak into each other.
+    Returns [] when no token is given.
+    """
+    if not token:
         return []
     try:
         async with httpx.AsyncClient(timeout=15) as client:
             r = await client.get(
                 f"{BASE}/recommendations/{media_type}",
-                headers=_headers(),
+                headers=_headers(token),
                 params={"limit": limit, "ignore_collected": "true"},
             )
             if r.status_code != 200:

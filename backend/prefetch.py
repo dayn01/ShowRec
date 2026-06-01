@@ -123,6 +123,13 @@ async def _build_recommendations(history: list[dict], profile_id: int = 1) -> di
 
     seen_ids = {tid for tid, _ in watched_ids}
     seen_ids |= dismissed  # also exclude them from the candidate results
+
+    # This profile's own Trakt token (global owner token only for the default
+    # profile) — mirrors sync_watch_state so profiles don't share recommendations.
+    profile = await database.get_profile(profile_id)
+    trakt_token = (profile.get("trakt_token") if profile else None) or (
+        settings.trakt_access_token if profile_id == 1 else None)
+
     taste = await _build_taste_profile(history)
     genre_affinity = taste["genres"]
     max_genre = max(genre_affinity.values()) if genre_affinity else 1
@@ -186,33 +193,34 @@ async def _build_recommendations(history: list[dict], profile_id: int = 1) -> di
             else:
                 scored[item_id]["_freq"] += recency_weight
 
-    # Blend in Trakt's personalised recommendations (if connected)
-    for media_type, tmdb_type in (("shows", "tv"), ("movies", "movie")):
-        try:
-            personal = await trakt.get_personal_recommendations(media_type, limit=30)
-        except Exception:
-            personal = []
-        for entry in personal:
-            tid = entry.get("ids", {}).get("tmdb")
-            if not tid or tid in seen_ids:
-                continue
-            if tid in scored:
-                scored[tid]["_trakt"] = 8       # strong endorsement
-            else:
-                scored[tid] = {
-                    "id": tid,
-                    "title": entry.get("title"),
-                    "name": entry.get("title"),
-                    "overview": entry.get("overview", ""),
-                    "vote_average": (entry.get("rating") or 0),
-                    "media_type": tmdb_type,
-                    "poster_url": None,
-                    "genre_ids": [],
-                    "_quality": entry.get("rating") or 0,
-                    "_genre": 0,
-                    "_freq": 0,
-                    "_trakt": 8,
-                }
+    # Blend in THIS profile's own Trakt recommendations (only if it's linked).
+    if trakt_token:
+        for media_type, tmdb_type in (("shows", "tv"), ("movies", "movie")):
+            try:
+                personal = await trakt.get_personal_recommendations(media_type, limit=30, token=trakt_token)
+            except Exception:
+                personal = []
+            for entry in personal:
+                tid = entry.get("ids", {}).get("tmdb")
+                if not tid or tid in seen_ids:
+                    continue
+                if tid in scored:
+                    scored[tid]["_trakt"] = 8       # strong endorsement
+                else:
+                    scored[tid] = {
+                        "id": tid,
+                        "title": entry.get("title"),
+                        "name": entry.get("title"),
+                        "overview": entry.get("overview", ""),
+                        "vote_average": (entry.get("rating") or 0),
+                        "media_type": tmdb_type,
+                        "poster_url": None,
+                        "genre_ids": [],
+                        "_quality": entry.get("rating") or 0,
+                        "_genre": 0,
+                        "_freq": 0,
+                        "_trakt": 8,
+                    }
 
     # ── Taste-based discovery: surface titles by the THEMES and PEOPLE you watch
     #    most, not just "similar to specific shows". These broaden personalization.
@@ -296,6 +304,26 @@ async def _build_recommendations(history: list[dict], profile_id: int = 1) -> di
     movie_items = [i for i in ranked if i.get("media_type") == "movie"][:100]
     results_sorted = sorted(tv_items + movie_items, key=lambda x: x["score"], reverse=True)
 
+    # Backfill posters/genres for items that arrived without them (Trakt-only
+    # picks). Mostly cache hits; only genuinely-new titles hit TMDB.
+    async def _backfill(item):
+        try:
+            show = await database.get_show(item["id"]) \
+                or await _fetch_and_cache_show(item["id"], item.get("media_type", "tv"))
+        except Exception:
+            return
+        if not show:
+            return
+        item["poster_url"] = show.get("poster_url")
+        if not item.get("genre_ids"):
+            item["genre_ids"] = show.get("genre_ids", [])
+        if not item.get("overview"):
+            item["overview"] = show.get("overview", "")
+        if not item.get("vote_average"):
+            item["vote_average"] = show.get("vote_average", 0)
+
+    await asyncio.gather(*[_backfill(i) for i in results_sorted if not i.get("poster_url")])
+
     # Strip internal scoring fields before caching
     for item in results_sorted:
         for k in ("_quality", "_genre", "_freq", "_trakt", "_taste", "_tastedive"):
@@ -307,7 +335,7 @@ async def _build_recommendations(history: list[dict], profile_id: int = 1) -> di
         "based_on": len(watched_ids),
         "top_genres": top_genres,
         "genre_affinity": dict(genre_affinity),   # name -> weight, for search ranking
-        "trakt_blended": bool(settings.trakt_access_token),
+        "trakt_blended": bool(trakt_token),
         "tastedive_blended": tastedive.enabled(),
     }
 
