@@ -1,6 +1,15 @@
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Recommendation, api } from "../api";
 import { useWatched } from "../WatchedContext";
+
+// Jellyseerr/Overseerr availability → badge appearance. Absent status = no badge.
+const REQUEST_BADGES: Record<string, { label: string; bg: string; color: string }> = {
+  available:  { label: "✓ In Library", bg: "var(--green)",  color: "#000" },
+  partial:    { label: "◐ Partial",    bg: "var(--yellow)", color: "#000" },
+  processing: { label: "⬇ Downloading", bg: "var(--accent)", color: "#fff" },
+  pending:    { label: "⏳ Requested",  bg: "var(--accent)", color: "#fff" },
+};
 
 const PLACEHOLDER = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='300' viewBox='0 0 200 300'%3E%3Crect width='200' height='300' fill='%231a1a24'/%3E%3Ctext x='100' y='155' text-anchor='middle' fill='%234444aa' font-size='14' font-family='sans-serif'%3ENo Image%3C/text%3E%3C/svg%3E";
 
@@ -28,6 +37,16 @@ export default function MediaCard({ item, onClick, onMarkedSeen, fading, onSimil
   }
   const progress = item.media_type === "tv" ? showProgress(item.id) : (watched ? "full" : "none");
   const borderColor = progress === "full" ? "var(--green)" : progress === "partial" ? "var(--yellow)" : "var(--border)";
+
+  // Bulk Jellyseerr/Overseerr status map (one shared fetch across all cards).
+  const { data: reqStatuses } = useQuery({
+    queryKey: ["request-statuses"],
+    queryFn: api.getRequestStatuses,
+    staleTime: 1000 * 60 * 2,
+  });
+  const reqBadge = reqStatuses?.enabled
+    ? REQUEST_BADGES[reqStatuses.statuses[item.id]]
+    : undefined;
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
 
@@ -115,6 +134,14 @@ export default function MediaCard({ item, onClick, onMarkedSeen, fading, onSimil
             background: "rgba(124,106,247,0.9)", borderRadius: 20,
             padding: "2px 8px", fontSize: 10, fontWeight: 700, color: "#fff",
           }}>✨ AI Pick</div>
+        )}
+        {/* Jellyseerr/Overseerr status: requested/downloading → flips to ✓ when in library */}
+        {reqBadge && (
+          <div style={{
+            position: "absolute", top: item.ai_endorsed ? 60 : 34, left: 8,
+            background: reqBadge.bg, borderRadius: 20,
+            padding: "2px 8px", fontSize: 10, fontWeight: 700, color: reqBadge.color,
+          }}>{reqBadge.label}</div>
         )}
 
         <div style={{

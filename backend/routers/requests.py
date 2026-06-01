@@ -34,3 +34,11 @@ async def request_status(media_type: str, tmdb_id: int):
         return {"enabled": False, "status": "unknown", "requested": False}
     info = await overseerr.get_status(tmdb_id, media_type)
     return {"enabled": True, **info}
+
+
+@router.get("/statuses")
+async def request_statuses():
+    """Bulk {tmdb_id: status} map for card badges — one call for the whole grid."""
+    if not overseerr.is_configured():
+        return {"enabled": False, "statuses": {}}
+    return {"enabled": True, "statuses": await overseerr.get_all_statuses()}

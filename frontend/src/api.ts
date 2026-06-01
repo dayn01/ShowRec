@@ -148,6 +148,8 @@ export const api = {
     get<{ enabled: boolean; results: Recommendation[] }>(`/details/${mediaType}/${tmdbId}/similar`),
   getRequestStatus: (mediaType: string, tmdbId: number) =>
     get<RequestStatus>(`/request/status/${mediaType}/${tmdbId}`),
+  getRequestStatuses: () =>
+    get<{ enabled: boolean; statuses: Record<string, string> }>(`/request/statuses`),
   requestMedia: (tmdbId: number, mediaType: string) =>
     fetch(`/api/request`, {
       method: "POST",

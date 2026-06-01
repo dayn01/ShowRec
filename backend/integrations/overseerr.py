@@ -65,6 +65,40 @@ async def get_status(tmdb_id: int, media_type: str) -> dict:
         return {"status": "unknown", "requested": False}
 
 
+async def get_all_statuses() -> dict[int, str]:
+    """
+    Map of {tmdb_id: status_string} for everything Overseerr/Jellyseerr tracks —
+    both requested items and titles already available via its library sync.
+    Powers the per-card availability badge with a single call (paginated).
+    """
+    result: dict[int, str] = {}
+    take = 100
+    skip = 0
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            for _ in range(50):  # hard cap: 5000 items, avoids runaway loops
+                r = await client.get(
+                    f"{_base()}/api/v1/media",
+                    headers=_headers(),
+                    params={"take": take, "skip": skip},
+                )
+                if r.status_code != 200:
+                    break
+                data = r.json() or {}
+                items = data.get("results", [])
+                for m in items:
+                    tmdb = m.get("tmdbId")
+                    if tmdb is not None:
+                        result[int(tmdb)] = _STATUS.get(m.get("status"), "unknown")
+                total = (data.get("pageInfo") or {}).get("results", 0)
+                skip += take
+                if not items or skip >= total:
+                    break
+    except Exception:
+        pass
+    return result
+
+
 async def request_media(tmdb_id: int, media_type: str) -> dict:
     """
     File a request with Overseerr. For TV, request all seasons.
