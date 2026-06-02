@@ -154,11 +154,11 @@ export const api = {
     get<RequestStatus>(`/request/status/${mediaType}/${tmdbId}`),
   getRequestStatuses: () =>
     get<{ enabled: boolean; statuses: Record<string, string> }>(`/request/statuses`),
-  requestMedia: (tmdbId: number, mediaType: string) =>
+  requestMedia: (tmdbId: number, mediaType: string, seasons?: number[]) =>
     fetch(`${BASE}/request`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Profile-Id": String(getProfileId()) },
-      body: JSON.stringify({ tmdb_id: tmdbId, media_type: mediaType }),
+      body: JSON.stringify({ tmdb_id: tmdbId, media_type: mediaType, seasons }),
     }).then(r => { if (!r.ok) throw new Error(r.statusText); return r.json() as Promise<{ ok: boolean; status: string }>; }),
   markWatched: (tmdbId: number, mediaType: string, title: string, year?: number) =>
     fetch(`${BASE}/watched`, {

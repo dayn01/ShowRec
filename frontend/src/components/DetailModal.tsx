@@ -122,7 +122,7 @@ export default function DetailModal({ tmdbId, mediaType, onClose }: Props) {
   }, []);
 
   const { isWatched, markWatched, markUnwatched, markShowComplete, initSeasonTotals,
-          isWatchlisted, toggleWatchlist, dismiss, showProgress } = useWatched();
+          isWatchlisted, toggleWatchlist, dismiss, showProgress, isSeasonWatched } = useWatched();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
 
@@ -133,9 +133,22 @@ export default function DetailModal({ tmdbId, mediaType, onClose }: Props) {
 
   async function requestMedia() {
     if (!data || reqState === "sending") return;
+    // For TV, only request seasons the user hasn't already fully watched
+    // (excludes specials/season 0). Movies request as-is.
+    let seasons: number[] | undefined;
+    if (data.media_type === "tv" && data.seasons) {
+      seasons = data.seasons
+        .filter(s => s.season_number >= 1 && !isSeasonWatched(data.id, s.season_number))
+        .map(s => s.season_number);
+      if (seasons.length === 0) {
+        // Everything's been seen — nothing to request.
+        setReqState("done");
+        return;
+      }
+    }
     setReqState("sending");
     try {
-      await api.requestMedia(data.id, data.media_type);
+      await api.requestMedia(data.id, data.media_type, seasons);
       setReqState("done");
     } catch {
       setReqState("error");

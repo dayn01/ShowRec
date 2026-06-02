@@ -3,6 +3,7 @@ clear message when Overseerr isn't configured, so the rest of the app is
 unaffected when the feature is off."""
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+from typing import Optional
 from integrations import overseerr
 
 router = APIRouter(prefix="/request", tags=["request"])
@@ -11,6 +12,7 @@ router = APIRouter(prefix="/request", tags=["request"])
 class RequestBody(BaseModel):
     tmdb_id: int
     media_type: str  # "movie" | "tv"
+    seasons: Optional[list[int]] = None  # TV: only these (unseen) seasons; None = all
 
 
 def _require_configured():
@@ -21,7 +23,7 @@ def _require_configured():
 @router.post("")
 async def create_request(body: RequestBody):
     _require_configured()
-    result = await overseerr.request_media(body.tmdb_id, body.media_type)
+    result = await overseerr.request_media(body.tmdb_id, body.media_type, body.seasons)
     if not result["ok"]:
         raise HTTPException(status_code=502, detail=result["detail"] or "Overseerr request failed")
     return result

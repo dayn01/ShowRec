@@ -99,15 +99,21 @@ async def get_all_statuses() -> dict[int, str]:
     return result
 
 
-async def request_media(tmdb_id: int, media_type: str) -> dict:
+async def request_media(tmdb_id: int, media_type: str, seasons: list[int] | None = None) -> dict:
     """
-    File a request with Overseerr. For TV, request all seasons.
+    File a request with Overseerr. For TV, request `seasons` (the unseen ones the
+    app computed); when None, request all. An empty list means nothing to request.
     Returns {"ok": bool, "status": <str>, "detail": <str|None>}.
     """
     kind = "movie" if media_type == "movie" else "tv"
     body: dict = {"mediaType": kind, "mediaId": tmdb_id}
     if kind == "tv":
-        body["seasons"] = "all"
+        if seasons is None:
+            body["seasons"] = "all"
+        elif len(seasons) == 0:
+            return {"ok": True, "status": "nothing_to_request", "detail": None}
+        else:
+            body["seasons"] = seasons
     try:
         async with httpx.AsyncClient(timeout=15) as client:
             r = await client.post(f"{_base()}/api/v1/request", headers=_headers(), json=body)

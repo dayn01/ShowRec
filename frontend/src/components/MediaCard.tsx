@@ -53,6 +53,11 @@ export default function MediaCard({ item, onClick, onMarkedSeen, fading, onSimil
   const isMobile = useIsMobile();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
+  // Drive hover-only buttons from JS state, not CSS :hover. CSS :hover sticks to
+  // whatever sits under a stationary cursor after a card is dismissed and the grid
+  // reflows — which made the next tile show a (red) dismiss X without being moused
+  // onto. mouseenter only fires on real pointer movement, so this avoids that.
+  const [hovered, setHovered] = useState(false);
 
   async function toggleSeen(e: React.MouseEvent) {
     e.stopPropagation();
@@ -90,10 +95,12 @@ export default function MediaCard({ item, onClick, onMarkedSeen, fading, onSimil
       cursor: "pointer",
     }}
       onMouseEnter={e => {
+        setHovered(true);
         (e.currentTarget as HTMLElement).style.transform = "translateY(-4px)";
         (e.currentTarget as HTMLElement).style.boxShadow = "0 8px 32px rgba(124,106,247,0.2)";
       }}
       onMouseLeave={e => {
+        setHovered(false);
         (e.currentTarget as HTMLElement).style.transform = "";
         (e.currentTarget as HTMLElement).style.boxShadow = "";
       }}
@@ -122,6 +129,7 @@ export default function MediaCard({ item, onClick, onMarkedSeen, fading, onSimil
             background: "rgba(0,0,0,0.75)", border: "none", borderRadius: "50%",
             width: 24, height: 24, cursor: "pointer", color: "#fff",
             fontSize: 14, lineHeight: "24px", textAlign: "center", padding: 0,
+            opacity: hovered ? 1 : 0,
           }}
         >✕</button>
         <div style={{
@@ -154,7 +162,7 @@ export default function MediaCard({ item, onClick, onMarkedSeen, fading, onSimil
           background: "linear-gradient(transparent, rgba(0,0,0,0.85))",
           padding: "24px 8px 8px",
           display: "flex", flexDirection: "column", alignItems: "center", gap: 5,
-          opacity: (watched || onWatchlist) ? 1 : undefined,
+          opacity: (watched || onWatchlist || hovered) ? 1 : 0,
         }}
           className="seen-overlay"
         >
