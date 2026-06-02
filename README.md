@@ -60,6 +60,12 @@ JELLYFIN_USER_ID=...
 PLEX_URL=http://192.168.1.10:32400
 PLEX_TOKEN=...
 
+# Optional — Overseerr/Jellyseerr: adds a "Request" button + availability badges
+# that auto-request via Sonarr/Radarr. Works with either (same API). For TV, only
+# your unwatched seasons are requested.
+OVERSEERR_URL=http://192.168.1.10:5055
+OVERSEERR_API_KEY=...
+
 # Optional — Trakt (community ratings + your history/calendar)
 TRAKT_CLIENT_ID=...
 TRAKT_CLIENT_SECRET=...
@@ -85,6 +91,10 @@ HA_NOTIFICATION_SERVICE=notify.mobile_app_yourphone
 - **Jellyfin user ID:** Dashboard → Users → click your user → the ID is in the URL,
   or open `http://<jellyfin>/Users` with your API key
 - **Plex token:** <https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/>
+- **Overseerr/Jellyseerr API key:** in either app → Settings → General → **API Key**.
+  Use Jellyseerr if your media server is Jellyfin, Overseerr if it's Plex — the app
+  treats them identically (both fill the `OVERSEERR_*` vars). Optional; omit it and
+  the Request button + availability badges simply don't appear.
 - **Trakt:** create an app at <https://trakt.tv/oauth/applications> (redirect URI
   `urn:ietf:wg:oauth:2.0:oob`) for the client id/secret; the access token needs a
   one-time OAuth exchange (see `get_trakt_token.ps1` for the flow, or any Trakt
@@ -203,6 +213,10 @@ recommendations and shows up as watched.
 - **TasteDive is optional** — with a `TASTEDIVE_API_KEY` set, opening a title's
   details shows a "More Like This" row of similar shows/films (each clickable to
   open its own details); without a key the row is hidden.
+- **Requests are optional** — set `OVERSEERR_URL` + `OVERSEERR_API_KEY` (Overseerr
+  or Jellyseerr) and each title gains a **Request** button plus availability
+  badges (⏳ Requested → ⬇ Downloading → ✓ In Library). Requesting a TV show only
+  asks for the seasons you haven't watched. Without the keys, none of it appears.
 
 ## Troubleshooting
 
