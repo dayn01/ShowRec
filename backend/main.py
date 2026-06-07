@@ -38,9 +38,7 @@ app = FastAPI(title="Show Recommendation App", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    # Port optional + https so Capacitor's WebView origin (http(s)://localhost,
-    # no port) is allowed alongside LAN browsers (http://192.168.x.x:port).
-    allow_origin_regex=r"https?://(localhost|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)(:\d+)?",
+    allow_origin_regex=r"http://(localhost|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+):\d+",
     allow_methods=["*"],
     allow_headers=["*"],
 )

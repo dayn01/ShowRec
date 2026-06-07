@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { api, getProfileId, setProfileId, Profile, BASE } from "../api";
+import { api, getProfileId, setProfileId, Profile } from "../api";
 
 const EMOJIS = ["🍿", "🎬", "📺", "🦸", "👽", "🧙", "🐱", "🌟", "🎮", "👤", "👩", "👨", "🧒"];
 
@@ -38,7 +38,7 @@ export default function ProfileSwitcher() {
   }, []);
 
   function loadUserLists() {
-    fetch(`${BASE}/upcoming/jellyfin-users`)
+    fetch("/api/upcoming/jellyfin-users")
       .then(r => r.ok ? r.json() : null)
       .then(d => setJellyfinUsers(d?.users ?? []))
       .catch(() => {});

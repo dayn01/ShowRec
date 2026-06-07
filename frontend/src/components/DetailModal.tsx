@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { api, DetailedMedia, Recommendation, BASE } from "../api";
+import { api, DetailedMedia, Recommendation } from "../api";
 
 // Let a vertical mouse wheel scroll a horizontal row. Uses a non-passive native
 // listener (React's onWheel is passive, so preventDefault is ignored there).
@@ -97,7 +97,7 @@ export default function DetailModal({ tmdbId, mediaType, onClose }: Props) {
     const target = airedSeasons[airedSeasons.length - 1] ?? data.seasons[0];
     if (target) setAutoExpandSeason(target.season_number);
     // Trigger background prefetch of all seasons into SQLite
-    fetch(`${BASE}/details/tv/${current.tmdbId}/prefetch-seasons`, { method: "POST" }).catch(() => {});
+    fetch(`/api/details/tv/${current.tmdbId}/prefetch-seasons`, { method: "POST" }).catch(() => {});
   }, [data?.id]);
 
   // Navigate the modal to a similar title (scroll back to top).

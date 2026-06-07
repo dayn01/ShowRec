@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from "react";
-import { getProfileId, BASE } from "./api";
+import { getProfileId } from "./api";
 
 const pidHeaders = () => ({ "Content-Type": "application/json", "X-Profile-Id": String(getProfileId()) });
 
@@ -91,7 +91,7 @@ export function WatchedProvider({ children }: { children: ReactNode }) {
 
   // Load dismissals + watchlist from backend
   useEffect(() => {
-    fetch(`${BASE}/watched/dismissed`, { headers: pidHeaders() })
+    fetch("/api/watched/dismissed", { headers: pidHeaders() })
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         if (data?.tmdb_ids?.length) {
@@ -99,7 +99,7 @@ export function WatchedProvider({ children }: { children: ReactNode }) {
         }
       })
       .catch(() => {});
-    fetch(`${BASE}/watchlist/ids`, { headers: pidHeaders() })
+    fetch("/api/watchlist/ids", { headers: pidHeaders() })
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         setWatchlistIds(new Set((data?.tmdb_ids ?? []).map(String)));
@@ -109,7 +109,7 @@ export function WatchedProvider({ children }: { children: ReactNode }) {
 
   // Load from backend
   useEffect(() => {
-    fetch(`${BASE}/watched/history`, { headers: pidHeaders() })
+    fetch("/api/watched/history", { headers: pidHeaders() })
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         if (!data) return;
@@ -316,7 +316,7 @@ export function WatchedProvider({ children }: { children: ReactNode }) {
 
   const dismiss = useCallback((id: number, mediaType: string, title: string) => {
     setDismissedIds(p => new Set([...p, String(id)]));
-    fetch(`${BASE}/watched/dismiss`, {
+    fetch("/api/watched/dismiss", {
       method: "POST", headers: pidHeaders(),
       body: JSON.stringify({ tmdb_id: id, media_type: mediaType, title }),
     }).catch(() => {});
@@ -324,7 +324,7 @@ export function WatchedProvider({ children }: { children: ReactNode }) {
 
   const undismiss = useCallback((id: number, mediaType: string) => {
     setDismissedIds(p => { const s = new Set(p); s.delete(String(id)); return s; });
-    fetch(`${BASE}/watched/dismiss`, {
+    fetch("/api/watched/dismiss", {
       method: "DELETE", headers: pidHeaders(),
       body: JSON.stringify({ tmdb_id: id, media_type: mediaType }),
     }).catch(() => {});
@@ -338,13 +338,13 @@ export function WatchedProvider({ children }: { children: ReactNode }) {
     const on = watchlistIds.has(String(id));
     if (on) {
       setWatchlistIds(p => { const s = new Set(p); s.delete(String(id)); return s; });
-      fetch(`${BASE}/watchlist`, {
+      fetch("/api/watchlist", {
         method: "DELETE", headers: pidHeaders(),
         body: JSON.stringify({ tmdb_id: id, media_type: item.media_type }),
       }).catch(() => {});
     } else {
       setWatchlistIds(p => new Set([...p, String(id)]));
-      fetch(`${BASE}/watchlist`, {
+      fetch("/api/watchlist", {
         method: "POST", headers: pidHeaders(),
         body: JSON.stringify({
           tmdb_id: id, media_type: item.media_type,

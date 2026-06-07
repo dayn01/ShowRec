@@ -1,8 +1,4 @@
-// Backend origin. Empty in dev — Vite proxies "/api" → http://localhost:8000.
-// In a packaged build (Capacitor on the Shield), set VITE_API_URL to the
-// backend's reachable address, e.g. http://192.168.0.116:8087, at build time.
-const ORIGIN = (import.meta.env.VITE_API_URL ?? "").replace(/\/+$/, "");
-export const BASE = `${ORIGIN}/api`;
+const BASE = "/api";
 
 // Active profile id (per-device), sent on every request.
 export function getProfileId(): number {
@@ -124,7 +120,7 @@ export interface DetailedMedia {
 
 export const api = {
   getCustomRecommendations: (body: { media_type: string; genres: string[]; prompt: string }) =>
-    fetch(`${BASE}/ai-recommendations/custom`, {
+    fetch("/api/ai-recommendations/custom", {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Profile-Id": String(getProfileId()) },
       body: JSON.stringify(body),
@@ -155,32 +151,32 @@ export const api = {
   getRequestStatuses: () =>
     get<{ enabled: boolean; statuses: Record<string, string> }>(`/request/statuses`),
   requestMedia: (tmdbId: number, mediaType: string, seasons?: number[]) =>
-    fetch(`${BASE}/request`, {
+    fetch(`/api/request`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Profile-Id": String(getProfileId()) },
       body: JSON.stringify({ tmdb_id: tmdbId, media_type: mediaType, seasons }),
     }).then(r => { if (!r.ok) throw new Error(r.statusText); return r.json() as Promise<{ ok: boolean; status: string }>; }),
   markWatched: (tmdbId: number, mediaType: string, title: string, year?: number) =>
-    fetch(`${BASE}/watched`, {
+    fetch(`/api/watched`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Profile-Id": String(getProfileId()) },
       body: JSON.stringify({ tmdb_id: tmdbId, media_type: mediaType, title, year }),
     }).then(r => { if (!r.ok) throw new Error(r.statusText); return r.json(); }),
   markUnwatched: (tmdbId: number, mediaType: string, title: string) =>
-    fetch(`${BASE}/watched`, {
+    fetch(`/api/watched`, {
       method: "DELETE",
       headers: { "Content-Type": "application/json", "X-Profile-Id": String(getProfileId()) },
       body: JSON.stringify({ tmdb_id: tmdbId, media_type: mediaType, title }),
     }).then(r => { if (!r.ok) throw new Error(r.statusText); return r.json(); }),
 
   dismiss: (tmdbId: number, mediaType: string, title: string) =>
-    fetch(`${BASE}/watched/dismiss`, {
+    fetch(`/api/watched/dismiss`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Profile-Id": String(getProfileId()) },
       body: JSON.stringify({ tmdb_id: tmdbId, media_type: mediaType, title }),
     }).then(r => { if (!r.ok) throw new Error(r.statusText); return r.json(); }),
   undismiss: (tmdbId: number, mediaType: string) =>
-    fetch(`${BASE}/watched/dismiss`, {
+    fetch(`/api/watched/dismiss`, {
       method: "DELETE",
       headers: { "Content-Type": "application/json", "X-Profile-Id": String(getProfileId()) },
       body: JSON.stringify({ tmdb_id: tmdbId, media_type: mediaType }),
@@ -195,7 +191,7 @@ export const api = {
   getWatchlist: () => get<{ items: Recommendation[] }>(`/watchlist`),
   getWatchlistIds: () => get<{ tmdb_ids: number[] }>(`/watchlist/ids`),
   addWatchlist: (item: Recommendation) =>
-    fetch(`${BASE}/watchlist`, {
+    fetch(`/api/watchlist`, {
       method: "POST", headers: { "Content-Type": "application/json", "X-Profile-Id": String(getProfileId()) },
       body: JSON.stringify({
         tmdb_id: item.id, media_type: item.media_type,
@@ -205,7 +201,7 @@ export const api = {
       }),
     }).then(r => { if (!r.ok) throw new Error(r.statusText); return r.json(); }),
   removeWatchlist: (tmdbId: number, mediaType: string) =>
-    fetch(`${BASE}/watchlist`, {
+    fetch(`/api/watchlist`, {
       method: "DELETE", headers: { "Content-Type": "application/json", "X-Profile-Id": String(getProfileId()) },
       body: JSON.stringify({ tmdb_id: tmdbId, media_type: mediaType }),
     }).then(r => { if (!r.ok) throw new Error(r.statusText); return r.json(); }),
@@ -221,28 +217,28 @@ export const api = {
     }>(`/details/tv/${tmdbId}/season/${seasonNumber}`),
 
   markSeasonWatched: (tmdbId: number, title: string, seasonNumber: number, episodeNumbers?: number[]) =>
-    fetch(`${BASE}/watched/season`, {
+    fetch(`/api/watched/season`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Profile-Id": String(getProfileId()) },
       body: JSON.stringify({ tmdb_id: tmdbId, title, season_number: seasonNumber, episode_numbers: episodeNumbers }),
     }).then(r => { if (!r.ok) throw new Error(r.statusText); return r.json(); }),
 
   markSeasonUnwatched: (tmdbId: number, title: string, seasonNumber: number) =>
-    fetch(`${BASE}/watched/season`, {
+    fetch(`/api/watched/season`, {
       method: "DELETE",
       headers: { "Content-Type": "application/json", "X-Profile-Id": String(getProfileId()) },
       body: JSON.stringify({ tmdb_id: tmdbId, title, season_number: seasonNumber }),
     }).then(r => { if (!r.ok) throw new Error(r.statusText); return r.json(); }),
 
   markEpisodeWatched: (tmdbId: number, title: string, seasonNumber: number, episodeNumber: number) =>
-    fetch(`${BASE}/watched/episode`, {
+    fetch(`/api/watched/episode`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Profile-Id": String(getProfileId()) },
       body: JSON.stringify({ tmdb_id: tmdbId, title, season_number: seasonNumber, episode_number: episodeNumber }),
     }).then(r => { if (!r.ok) throw new Error(r.statusText); return r.json(); }),
 
   markEpisodeUnwatched: (tmdbId: number, title: string, seasonNumber: number, episodeNumber: number) =>
-    fetch(`${BASE}/watched/episode`, {
+    fetch(`/api/watched/episode`, {
       method: "DELETE",
       headers: { "Content-Type": "application/json", "X-Profile-Id": String(getProfileId()) },
       body: JSON.stringify({ tmdb_id: tmdbId, title, season_number: seasonNumber, episode_number: episodeNumber }),
@@ -253,31 +249,31 @@ export const api = {
   getRecSettings: (profileId: number) =>
     get<RecSettings>(`/profiles/${profileId}/rec-settings`),
   saveRecSettings: (profileId: number, body: RecSettings) =>
-    fetch(`${BASE}/profiles/${profileId}/rec-settings`, {
+    fetch(`/api/profiles/${profileId}/rec-settings`, {
       method: "PUT",
       headers: { "Content-Type": "application/json", "X-Profile-Id": String(getProfileId()) },
       body: JSON.stringify(body),
     }).then(r => { if (!r.ok) throw new Error(r.statusText); return r.json() as Promise<RecSettings>; }),
   getPlexUsers: () => get<{ users: { id: string; title: string; owner: boolean }[] }>(`/plex-users`),
   createProfile: (body: { name: string; emoji: string; jellyfin_user_id?: string | null; plex_user?: string | null }) =>
-    fetch(`${BASE}/profiles`, {
+    fetch(`/api/profiles`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Profile-Id": String(getProfileId()) },
       body: JSON.stringify(body),
     }).then(r => { if (!r.ok) throw new Error(r.statusText); return r.json() as Promise<Profile>; }),
   updateProfile: (id: number, body: { name?: string; emoji?: string; jellyfin_user_id?: string | null; plex_user?: string | null }) =>
-    fetch(`${BASE}/profiles/${id}`, {
+    fetch(`/api/profiles/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json", "X-Profile-Id": String(getProfileId()) },
       body: JSON.stringify(body),
     }).then(r => { if (!r.ok) throw new Error(r.statusText); return r.json() as Promise<Profile>; }),
   deleteProfile: (id: number) =>
-    fetch(`${BASE}/profiles/${id}`, {
+    fetch(`/api/profiles/${id}`, {
       method: "DELETE",
       headers: { "X-Profile-Id": String(getProfileId()) },
     }).then(r => { if (!r.ok) throw new Error(r.statusText); return r.json(); }),
   refreshProfile: (id: number, force = true) =>
-    fetch(`${BASE}/profiles/${id}/refresh?force=${force}`, {
+    fetch(`/api/profiles/${id}/refresh?force=${force}`, {
       method: "POST", headers: { "X-Profile-Id": String(getProfileId()) },
     }).then(r => r.json()),
 };
