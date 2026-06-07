@@ -474,6 +474,10 @@ async def _build_upcoming(history: list[dict], profile_id: int = 1) -> dict | No
         if e.get("show", {}).get("ids", {}).get("tmdb")
     }
 
+    # Bound TMDB fan-out for shows that aren't cached yet (a big library can be
+    # hundreds of shows). Cached shows resolve instantly without using a slot.
+    sem = asyncio.Semaphore(6)
+
     async def check_tmdb(tmdb_id):
         try:
             next_ep = None
@@ -485,8 +489,9 @@ async def _build_upcoming(history: list[dict], profile_id: int = 1) -> dict | No
                 next_ep = cached.get("next_episode_to_air")
                 title = cached.get("title") or cached.get("name", "")
             else:
-                # Fetch fresh from TMDB and update the cache
-                data = await tmdb.get_upcoming_episodes_for_show(tmdb_id)
+                # Fetch fresh from TMDB (bounded) and update the cache
+                async with sem:
+                    data = await tmdb.get_upcoming_episodes_for_show(tmdb_id)
                 if not data:
                     return
                 next_ep = data.get("next_episode")
@@ -516,7 +521,9 @@ async def _build_upcoming(history: list[dict], profile_id: int = 1) -> dict | No
         except Exception:
             pass
 
-    await asyncio.gather(*[check_tmdb(tid) for tid in tv_ids[:60]])
+    # Check every watched show, not just the first 60 — a large (e.g. Netflix-
+    # imported) library would otherwise drop most shows from Upcoming.
+    await asyncio.gather(*[check_tmdb(tid) for tid in tv_ids])
 
     # Sort by air date
     episodes.sort(key=lambda e: e.get("first_aired", ""))
