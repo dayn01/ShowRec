@@ -70,7 +70,7 @@ export function WatchedProvider({ children }: { children: ReactNode }) {
   // One-time reset of stale watch-state caches. Bump WC_VERSION whenever the
   // backend watch-state shape changes so old (wrong) localStorage is discarded.
   // The DB is the source of truth and re-seeds on load, so this is safe.
-  const WC_VERSION = "3";
+  const WC_VERSION = "4";
   if (typeof window !== "undefined" && localStorage.getItem("wc_version") !== WC_VERSION) {
     ["wc_shows", "wc_episodes", "wc_progress", "wc_seasons", "wc_season_progress"]
       .forEach(k => localStorage.removeItem(k));
@@ -94,9 +94,8 @@ export function WatchedProvider({ children }: { children: ReactNode }) {
     fetch("/api/watched/dismissed", { headers: pidHeaders() })
       .then(r => r.ok ? r.json() : null)
       .then(data => {
-        if (data?.tmdb_ids?.length) {
-          setDismissedIds(prev => new Set([...prev, ...data.tmdb_ids.map(String)]));
-        }
+        // Replace (not merge) so a re-synced account doesn't keep old dismissals.
+        if (data) setDismissedIds(new Set((data.tmdb_ids ?? []).map(String)));
       })
       .catch(() => {});
     fetch("/api/watchlist/ids", { headers: pidHeaders() })
@@ -107,7 +106,11 @@ export function WatchedProvider({ children }: { children: ReactNode }) {
       .catch(() => {});
   }, []);
 
-  // Load from backend
+  // Load from backend. The DB is the source of truth, so we REPLACE the local
+  // watch sets with what it returns rather than merging — otherwise a wiped /
+  // re-synced (or switched) account leaves the previous account's watched items
+  // in this browser's localStorage and they keep showing in "Watching". Only
+  // replace on a successful response (don't wipe on a transient network error).
   useEffect(() => {
     fetch("/api/watched/history", { headers: pidHeaders() })
       .then(r => r.ok ? r.json() : null)
@@ -116,33 +119,23 @@ export function WatchedProvider({ children }: { children: ReactNode }) {
 
         // Fully-watched items: explicit marks + shows the backend detected as complete
         const fullIds = [...(data.tmdb_ids ?? []), ...(data.complete_tmdb_ids ?? [])];
-        if (fullIds.length) {
-          setWatchedShows(prev => new Set([...prev, ...fullIds.map(String)]));
-        }
+        setWatchedShows(new Set(fullIds.map(String)));
 
-        if (data.episodes?.length) {
-          setWatchedEpisodes(prev => {
-            const s = new Set(prev);
-            data.episodes.forEach((e: any) => s.add(epKey(e.tmdb_id, e.season, e.episode)));
-            return s;
-          });
-        }
+        const eps = new Set<string>();
+        (data.episodes ?? []).forEach((e: any) => eps.add(epKey(e.tmdb_id, e.season, e.episode)));
+        setWatchedEpisodes(eps);
 
-        // Load season watched counts (total=0 until TMDB confirms)
-        if (data.seasons?.length) {
-          setProgressMap(prev => {
-            const m = new Map(prev);
-            data.seasons.forEach((s: any) => {
-              const k = sKey(s.tmdb_id, s.season);
-              const existing = m.get(k);
-              m.set(k, {
-                watched: s.episodes_watched,
-                total: existing?.total ?? 0, // keep TMDB total if we already have it
-              });
-            });
-            return m;
+        // Rebuild season watched counts from the backend, keeping any TMDB totals
+        // we already know (so season sizes survive; watched counts reset cleanly).
+        setProgressMap(prev => {
+          const m = new Map<string, SeasonProgress>();
+          for (const [k, v] of prev) if (v.total > 0) m.set(k, { watched: 0, total: v.total });
+          (data.seasons ?? []).forEach((s: any) => {
+            const k = sKey(s.tmdb_id, s.season);
+            m.set(k, { watched: s.episodes_watched, total: m.get(k)?.total ?? 0 });
           });
-        }
+          return m;
+        });
       })
       .catch(() => {});
   }, []);

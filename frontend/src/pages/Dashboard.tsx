@@ -302,9 +302,12 @@ export default function Dashboard() {
 
   // Hide anything already marked as seen (movies watched, shows fully complete).
   // Reactive — updates the grid the moment you click "Mark Seen".
+  // Exception: a show flagged new_season is resurfaced (it has a new season),
+  // so it shows even when watched — but "not interested" still hides it.
   const notWatched = (i: any) =>
     !isDismissed(i.id) &&
-    (i.media_type === "tv" ? showProgress(i.id) !== "full" : !isWatched(i.id));
+    (i.new_season ||
+      (i.media_type === "tv" ? showProgress(i.id) !== "full" : !isWatched(i.id)));
 
   const shouldShow = (i: any) => notWatched(i) || lingering.has(i.id);
   let baseItems = active.items.filter(shouldShow);

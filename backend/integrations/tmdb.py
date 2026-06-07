@@ -11,6 +11,18 @@ def _params(**kwargs) -> dict:
     return {"api_key": settings.tmdb_api_key, **kwargs}
 
 
+async def validate_key(api_key: str) -> bool:
+    """Return True if the given TMDB v3 key is accepted. Used by setup wizard."""
+    if not api_key:
+        return False
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(f"{BASE}/configuration", params={"api_key": api_key})
+            return r.status_code == 200
+    except Exception:
+        return False
+
+
 async def search(query: str, media_type: str = "multi") -> list[dict]:
     async with httpx.AsyncClient() as client:
         r = await client.get(f"{BASE}/search/{media_type}", params=_params(query=query))

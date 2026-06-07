@@ -230,6 +230,30 @@ async def update_profile(profile_id: int, **fields):
         await db.commit()
 
 
+async def upsert_default_profile(name: str = "Me", emoji: str = "🍿",
+                                 jellyfin_user_id: str | None = None) -> dict:
+    """
+    Guarantee the default profile (id 1) exists with the given name/emoji and
+    Jellyfin link. Creates it if missing, otherwise updates those fields. Used by
+    the setup wizard so finishing setup always leaves a usable, linked profile.
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT 1 FROM profiles WHERE id=1") as cur:
+            exists = await cur.fetchone() is not None
+        if exists:
+            await db.execute(
+                "UPDATE profiles SET name=?, emoji=?, jellyfin_user_id=? WHERE id=1",
+                (name, emoji, jellyfin_user_id or None),
+            )
+        else:
+            await db.execute(
+                "INSERT INTO profiles (id, name, emoji, jellyfin_user_id, created_at) VALUES (1, ?, ?, ?, ?)",
+                (name, emoji, jellyfin_user_id or None, int(time.time())),
+            )
+        await db.commit()
+    return await get_profile(1)
+
+
 async def delete_profile(profile_id: int):
     async with aiosqlite.connect(DB_PATH) as db:
         for t in ("watch_state", "dismissed", "watchlist"):
@@ -405,6 +429,32 @@ async def sync_watched_bulk(profile_id: int, rows: list[tuple]):
         await db.commit()
 
 
+async def replace_watched_source(profile_id: int, source: str, rows: list[tuple]):
+    """
+    Replace ALL of a profile's watch rows for one external source with a fresh
+    set, atomically (delete then insert). Unlike sync_watched_bulk this REMOVES
+    the source's old rows, so switching or unlinking an account doesn't leave the
+    previous account's data behind. Other sources (manual marks = 'user', Netflix
+    import = 'netflix', Plex, Trakt) are untouched.
+    Pass rows=[] to simply clear the source. Each row:
+    (media_type, tmdb_id, season, episode, title).
+    """
+    now = int(time.time())
+    full = [(profile_id, r[0], r[1], r[2], r[3], r[4], now, source) for r in rows]
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "DELETE FROM watch_state WHERE profile_id=? AND source=?", (profile_id, source)
+        )
+        if full:
+            await db.executemany(
+                """INSERT OR IGNORE INTO watch_state
+                   (profile_id, media_type, tmdb_id, season_number, episode_number, title, watched_at, source)
+                   VALUES (?,?,?,?,?,?,?,?)""",
+                full,
+            )
+        await db.commit()
+
+
 async def unmark_watched(profile_id: int, media_type: str, tmdb_id: int, season: int = -1, episode: int = -1):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
@@ -550,6 +600,20 @@ async def get_watched_for_recommendations(profile_id: int) -> list[dict]:
     return items
 
 
+async def max_watched_season_by_show(profile_id: int) -> dict[int, int]:
+    """
+    tmdb_id -> the highest season number this profile has any watched episode in.
+    Used to detect "a new season is out that you haven't started".
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT tmdb_id, MAX(season_number) FROM watch_state "
+            "WHERE profile_id=? AND media_type='episode' GROUP BY tmdb_id",
+            (profile_id,)
+        ) as cur:
+            return {tid: season for tid, season in await cur.fetchall()}
+
+
 async def get_watch_state_stats(profile_id: int) -> dict:
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(
@@ -595,15 +659,26 @@ async def cache_age(key: str) -> int | None:
 
 # ── Shows ─────────────────────────────────────────────────────────────────────
 
-async def get_show(tmdb_id: int) -> dict | None:
+async def get_show(tmdb_id: int, allow_stale: bool = False) -> dict | None:
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute("SELECT data, cached_at FROM shows WHERE tmdb_id=?", (tmdb_id,)) as cur:
             row = await cur.fetchone()
     if not row:
         return None
-    if time.time() - row[1] > TTL["show"]:
+    # allow_stale serves the cached copy regardless of age — used by the Watching
+    # page, where season counts barely change and a fast load matters more than
+    # freshness (the background prefetch refreshes it anyway).
+    if not allow_stale and time.time() - row[1] > TTL["show"]:
         return None
     return json.loads(row[0])
+
+
+async def cached_show_ids() -> set[int]:
+    """tmdb_ids currently in the show cache (any age). Lets the warmer skip
+    already-cached shows with a single query."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT tmdb_id FROM shows") as cur:
+            return {r[0] for r in await cur.fetchall()}
 
 
 async def set_show(tmdb_id: int, media_type: str, data: dict):
@@ -646,6 +721,19 @@ async def get_all_cached_show_ids() -> list[tuple[int, str]]:
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute("SELECT tmdb_id, media_type FROM shows") as cur:
             return await cur.fetchall()
+
+
+async def wipe_synced_data():
+    """
+    Clear all synced + cached data so it rebuilds cleanly from source.
+    Used when the linked Jellyfin account changes (setup wizard). Deletes
+    watch state and the TMDB/recommendation caches; keeps user-curated data
+    (profiles, dismissed titles, watchlist).
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        for table in ("watch_state", "shows", "seasons", "cache"):
+            await db.execute(f"DELETE FROM {table}")
+        await db.commit()
 
 
 async def purge_stale(older_than_days: int = 30):

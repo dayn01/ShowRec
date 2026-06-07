@@ -147,6 +147,14 @@ export default function MediaCard({ item, onClick, onMarkedSeen, fading, onSimil
             padding: "2px 8px", fontSize: 10, fontWeight: 700, color: "#fff",
           }}>✨ AI Pick</div>
         )}
+        {item.new_season && (
+          <div style={{
+            position: "absolute", bottom: 8, left: 8, right: 8,
+            background: "rgba(224,184,108,0.95)", borderRadius: 8,
+            padding: "3px 8px", fontSize: 10, fontWeight: 700, color: "#000",
+            textAlign: "center", lineHeight: 1.3,
+          }}>🆕 {item.reason || "New season"}</div>
+        )}
         {/* Jellyseerr/Overseerr status: requested/downloading → flips to ✓ when in library.
             Desktop: poster corner. Mobile: moved to the content area below (less crowded). */}
         {!isMobile && reqBadge && (

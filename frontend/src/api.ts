@@ -37,6 +37,11 @@ export interface RecSettings {
   genre_multipliers: Record<string, number>;
 }
 
+export interface SetupStatus {
+  configured: boolean;
+  has: Record<string, boolean>;
+}
+
 export interface Recommendation {
   id: number;
   title?: string;
@@ -50,6 +55,7 @@ export interface Recommendation {
   first_air_date?: string;
   reason?: string;        // AI explanation, when AI-endorsed
   ai_endorsed?: boolean;
+  new_season?: boolean;   // resurfaced watched show with a new season available
 }
 
 export interface UpcomingEpisode {
@@ -144,6 +150,13 @@ export const api = {
   getStatus: () => get<Status>("/status"),
   getDetails: (mediaType: string, tmdbId: number) =>
     get<DetailedMedia>(`/details/${mediaType}/${tmdbId}`),
+  // Trimmed details for many shows in one request (Watching page).
+  getDetailsBatch: (ids: number[]) =>
+    fetch(`/api/details/batch`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Profile-Id": String(getProfileId()) },
+      body: JSON.stringify({ ids }),
+    }).then(r => { if (!r.ok) throw new Error(r.statusText); return r.json() as Promise<{ shows: any[] }>; }),
   getSimilar: (mediaType: string, tmdbId: number) =>
     get<{ enabled: boolean; results: Recommendation[] }>(`/details/${mediaType}/${tmdbId}/similar`),
   getRequestStatus: (mediaType: string, tmdbId: number) =>
@@ -276,4 +289,25 @@ export const api = {
     fetch(`/api/profiles/${id}/refresh?force=${force}`, {
       method: "POST", headers: { "X-Profile-Id": String(getProfileId()) },
     }).then(r => r.json()),
+
+  // ── First-run setup ──
+  getSetupStatus: () => get<SetupStatus>(`/setup/status`),
+  testTmdb: (api_key: string) =>
+    fetch(`/api/setup/test/tmdb`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ api_key }),
+    }).then(r => { if (!r.ok) throw new Error(r.statusText); return r.json() as Promise<{ ok: boolean }>; }),
+  testJellyfin: (url: string, api_key: string) =>
+    fetch(`/api/setup/test/jellyfin`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url, api_key }),
+    }).then(r => { if (!r.ok) throw new Error(r.statusText); return r.json() as Promise<{ ok: boolean; users: { id: string; name: string }[] }>; }),
+  saveSetup: (values: Record<string, string>, profile?: { name: string; emoji: string }) =>
+    fetch(`/api/setup`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ values, profile_name: profile?.name, profile_emoji: profile?.emoji }),
+    }).then(async r => { if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText); return r.json() as Promise<{ ok: boolean; wiped: boolean }>; }),
 };

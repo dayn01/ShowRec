@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 from integrations import tmdb, tastedive
 import asyncio
 import database
@@ -114,6 +115,61 @@ async def get_details(media_type: str, tmdb_id: int):
         return await _fetch_and_cache_show(tmdb_id, media_type)
     except Exception as e:
         raise HTTPException(502, f"TMDB error: {e}")
+
+
+def _trim_for_watching(show: dict) -> dict:
+    """Just the fields the Watching page needs — drops cast, overviews, keywords
+    and per-episode data, so the batched response stays small on a Pi."""
+    return {
+        "id": show.get("id"),
+        "title": show.get("title"),
+        "poster_url": show.get("poster_url"),
+        "vote_average": show.get("vote_average"),
+        "status": show.get("status"),
+        "networks": show.get("networks", []),
+        "number_of_seasons": show.get("number_of_seasons"),
+        "number_of_episodes": show.get("number_of_episodes"),
+        "seasons": [
+            {
+                "season_number": s.get("season_number"),
+                "name": s.get("name"),
+                "episode_count": s.get("episode_count"),
+                "air_date": s.get("air_date"),
+                "poster_url": s.get("poster_url"),
+            }
+            for s in show.get("seasons", [])
+        ],
+    }
+
+
+class DetailsBatchIn(BaseModel):
+    ids: list[int]
+
+
+@router.post("/batch")
+async def get_details_batch(body: DetailsBatchIn):
+    """
+    Fetch trimmed details for many shows in ONE request (the Watching page).
+    Served from the SQLite show cache; cache misses fetch from TMDB with bounded
+    concurrency so a big list (e.g. after a Netflix import) doesn't fan out into
+    hundreds of simultaneous TMDB calls on a low-power host.
+    """
+    ids = list(dict.fromkeys(body.ids))[:400]   # dedupe + safety cap
+    sem = asyncio.Semaphore(6)                   # bound TMDB fan-out for misses
+
+    async def one(tmdb_id: int):
+        # Serve cached even if stale — Watching cares about speed, not freshness.
+        show = await database.get_show(tmdb_id, allow_stale=True)
+        if not show:
+            async with sem:
+                try:
+                    show = await _fetch_and_cache_show(tmdb_id, "tv")
+                except Exception:
+                    return None
+        return _trim_for_watching(show)
+
+    results = await asyncio.gather(*[one(i) for i in ids])
+    return {"shows": [r for r in results if r]}
 
 
 async def _resolve_tastedive_item(item: dict, exclude_id: int) -> dict | None:

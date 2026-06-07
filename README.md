@@ -8,12 +8,18 @@ multiple **profiles** for a household.
 It runs as two small Docker containers (a FastAPI backend + an nginx-served web
 UI) and stores everything in a local SQLite file. No external database needed.
 
+> 🍓 **Low-power device / no Docker?** You can also run it as a single process
+> (uvicorn serves the API *and* the built UI) — ideal for a **Raspberry Pi 3**.
+> See [`deploy/README.md`](deploy/README.md) for the Docker-free install, which
+> includes a browser-based first-run setup wizard.
+
 ---
 
 ## What you'll need
 
-- A machine to run it on (any Linux box, a NAS, or a Raspberry Pi 4/5 with 64-bit OS)
-- **Docker** and **Docker Compose** installed
+- A machine to run it on (any Linux box, a NAS, or a Raspberry Pi — Pi 4/5 for
+  Docker, or a Pi 3 via the Docker-free install in [`deploy/README.md`](deploy/README.md))
+- **Docker** and **Docker Compose** installed (Docker path only)
 - A free **TMDB API key** (required)
 - Optionally: a **Jellyfin** and/or **Plex** server, a **Trakt** account, and an
   **Anthropic** key for the AI features — all optional, the app works without them
@@ -37,6 +43,13 @@ cd showrec
 ```
 
 ## 3. Create your `.env`
+
+> 🧙 **Prefer a UI?** If you're doing the **native Raspberry Pi install**
+> ([`deploy/README.md`](deploy/README.md)), you can skip hand-editing `.env`
+> entirely — a **first-run setup wizard** opens in the browser, tests your keys,
+> lets you tick which integrations to configure, and writes `.env` for you. The
+> manual steps below are for the Docker setup (where `.env` is mounted
+> read-only, so the wizard can't write it).
 
 ```bash
 cp .env.example .env
@@ -155,7 +168,8 @@ up everything (profiles, watchlist, watch state).
 | Want to… | See |
 |---|---|
 | Reach it by a name like `http://showrec.home` instead of an IP:port | [`DOCKER.md`](DOCKER.md) → "Give it a hostname" |
-| Run it on a Raspberry Pi | [`DOCKER.md`](DOCKER.md) — it's ARM-ready (use 64-bit OS) |
+| Run it on a Raspberry Pi 4/5 with Docker | [`DOCKER.md`](DOCKER.md) — it's ARM-ready (use 64-bit OS) |
+| Run it on a Raspberry Pi 3 / low-power box without Docker | [`deploy/README.md`](deploy/README.md) — single-process install + first-run wizard |
 | Access it securely over the internet with a login gate | [`CLOUDFLARE.md`](CLOUDFLARE.md) |
 | Import your Netflix viewing history | [see below](#import-your-netflix-history) |
 

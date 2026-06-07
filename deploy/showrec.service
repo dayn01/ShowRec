@@ -1,0 +1,23 @@
+[Unit]
+Description=ShowRec — Show Recommendation App (FastAPI/uvicorn)
+# Wait for the network so the first prefetch can reach TMDB/Plex/Anthropic.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=dayn0
+# --- adjust User + these three paths if your username/location differ ---
+WorkingDirectory=/home/dayn0/show-rec/backend
+Environment=DB_PATH=/home/dayn0/show-rec/data/showrec_cache.db
+ExecStart=/home/dayn0/show-rec/backend/venv/bin/uvicorn main:app --host 0.0.0.0 --port 80
+# Port 80 is privileged; this lets the non-root user bind it without sudo.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+# One worker is correct here: the app keeps an in-process scheduler + cache.
+Restart=on-failure
+RestartSec=5
+# Give the Pi a moment on slow SD cards before systemd calls it failed.
+TimeoutStartSec=60
+
+[Install]
+WantedBy=multi-user.target

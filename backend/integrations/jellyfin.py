@@ -131,6 +131,27 @@ async def get_resume_items() -> list[dict]:
         return r.json().get("Items", [])
 
 
+async def list_users(url: str, api_key: str) -> list[dict] | None:
+    """
+    List Jellyfin accounts for the setup wizard, using values typed into the
+    form (not the saved settings). Returns [{id, name}], or None if the
+    server/key is unreachable or rejected.
+    """
+    if not url or not api_key:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(
+                f"{url.rstrip('/')}/Users",
+                headers={"X-Emby-Token": api_key, "Content-Type": "application/json"},
+            )
+            if r.status_code != 200:
+                return None
+            return [{"id": u["Id"], "name": u.get("Name", "")} for u in r.json()]
+    except Exception:
+        return None
+
+
 async def ping() -> bool:
     try:
         async with httpx.AsyncClient(timeout=5) as client:

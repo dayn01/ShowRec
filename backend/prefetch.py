@@ -111,6 +111,61 @@ async def _tastedive_candidates(history: list[dict], sample_per_type: int = 6,
     return [r for r in resolved if r]
 
 
+async def _returning_shows(profile_id: int, dismissed: set[int]) -> list[dict]:
+    """
+    Watched TV shows that have a NEW season available — i.e. the show's next
+    episode to air is in a season beyond the highest one this profile has
+    watched. These resurface at the top of For You (flagged new_season) even
+    though they're "watched", because there's genuinely new content. Dismissed
+    ("not interested") shows are excluded.
+    """
+    max_season = await database.max_watched_season_by_show(profile_id)
+    out: list[dict] = []
+    for tmdb_id, watched_max in max_season.items():
+        if tmdb_id in dismissed:
+            continue
+        # Reuse the cached next_episode_to_air (the Upcoming build populates it)
+        # to avoid a TMDB call per watched show on every rebuild.
+        show = await database.get_show(tmdb_id)
+        if show and "next_episode_to_air" in show:
+            next_ep = show.get("next_episode_to_air")
+            info_title = show.get("title") or show.get("name")
+        else:
+            try:
+                info = await tmdb.get_upcoming_episodes_for_show(tmdb_id)
+            except Exception:
+                continue
+            next_ep = (info or {}).get("next_episode")
+            info_title = (info or {}).get("show_title")
+        if not next_ep or not next_ep.get("air_date"):
+            continue
+        next_season = next_ep.get("season_number") or 0
+        # Only when the upcoming episode is in a season you haven't watched.
+        if next_season <= (watched_max or 0):
+            continue
+        if not show:
+            show = await _fetch_and_cache_show(tmdb_id, "tv")
+        if not show:
+            continue
+        out.append({
+            "id": tmdb_id,
+            "title": show.get("title") or show.get("name") or info_title or "",
+            "name": show.get("name"),
+            "overview": show.get("overview", ""),
+            "poster_url": show.get("poster_url"),
+            "vote_average": show.get("vote_average", 0) or 0,
+            "media_type": "tv",
+            "genre_ids": show.get("genre_ids", []),
+            "first_air_date": show.get("first_air_date", ""),
+            "score": 9999,                       # pin to the top of For You
+            "base_score": 9999,                  # survive genre re-weighting on read
+            "genre_component": 0,
+            "new_season": True,
+            "reason": f"New season {next_season} — premieres {next_ep['air_date']}",
+        })
+    return out
+
+
 async def _build_recommendations(history: list[dict], profile_id: int = 1) -> dict | None:
     from collections import Counter
     # "Not interested" titles shouldn't shape the taste profile or seed similar
@@ -329,6 +384,14 @@ async def _build_recommendations(history: list[dict], profile_id: int = 1) -> di
         for k in ("_quality", "_genre", "_freq", "_trakt", "_taste", "_tastedive"):
             item.pop(k, None)
 
+    # Resurface watched shows that have a brand-new season available (not
+    # dismissed). They're excluded from the candidate pool above (already
+    # watched), so we add them explicitly at the front.
+    returning = await _returning_shows(profile_id, dismissed)
+    if returning:
+        present = {i["id"] for i in results_sorted}
+        results_sorted = [r for r in returning if r["id"] not in present] + results_sorted
+
     top_genres = [g for g, _ in genre_affinity.most_common(5)]
     return {
         "recommendations": results_sorted,
@@ -532,6 +595,36 @@ async def _cache_show_seasons(tmdb_id: int, all_seasons: bool = True):
         logger.warning(f"Failed to cache show {tmdb_id}: {e}")
 
 
+async def _warm_watching_cache(profile_id: int):
+    """
+    Ensure show DETAILS (incl. season episode counts) are cached for every show
+    this profile has episodes watched in, so the Watching page serves entirely
+    from the local cache. Only the show record is fetched (not each season's
+    episodes — that's the heavy part), and already-cached shows are skipped, so
+    this is cheap once warm. The Netflix importer doesn't populate this cache,
+    which is why a freshly-imported library loads slowly the first time.
+    """
+    show_ids = list((await database.max_watched_season_by_show(profile_id)).keys())
+    if not show_ids:
+        return
+    have = await database.cached_show_ids()
+    missing = [s for s in show_ids if s not in have][:500]
+    if not missing:
+        return
+    logger.info(f"Warm[p{profile_id}]: caching details for {len(missing)} watching shows")
+    sem = asyncio.Semaphore(6)
+
+    async def warm(tmdb_id):
+        async with sem:
+            try:
+                await _fetch_and_cache_show(tmdb_id, "tv")
+            except Exception:
+                pass
+
+    await asyncio.gather(*[warm(s) for s in missing])
+    logger.info(f"Warm[p{profile_id}]: watching-show cache warmed")
+
+
 async def _cache_watched_shows(history: list[dict]):
     """Cache all seasons + episodes for every watched TV show."""
     tv_ids = list({h["tmdb_id"] for h in history if h.get("tmdb_id") and h.get("media_type") == "tv"})
@@ -572,19 +665,29 @@ async def sync_watch_state(profile: dict):
     is_default = pid == 1
     rows: list[tuple] = []
 
-    # Jellyfin — per-episode watched, scoped to this profile's user
+    # Jellyfin — per-episode watched, scoped to this profile's own linked user.
+    # No global fallback: a profile only ever syncs the account explicitly linked
+    # to it (the wizard / profile editor sets this), never the main/admin account.
+    # We REPLACE this profile's Jellyfin rows rather than add to them, so changing
+    # or unlinking the account doesn't leave the old account's data behind.
     if settings.jellyfin_url and jf_user:
         try:
+            jf_rows: list[tuple] = []
             eps = await jellyfin.get_watched_episodes(jf_user)
             for e in eps:
-                rows.append(("episode", e["tmdb_id"], e["season"], e["episode"],
-                             e.get("series_name", ""), "jellyfin"))
+                jf_rows.append(("episode", e["tmdb_id"], e["season"], e["episode"],
+                                e.get("series_name", "")))
             movies = await jellyfin.get_watched_movies(jf_user)
             for m in movies:
-                rows.append(("movie", m["tmdb_id"], -1, -1, m.get("title", ""), "jellyfin"))
+                jf_rows.append(("movie", m["tmdb_id"], -1, -1, m.get("title", "")))
+            await database.replace_watched_source(pid, "jellyfin", jf_rows)
             logger.info(f"Sync[p{pid}]: Jellyfin gave {len(eps)} eps, {len(movies)} movies")
         except Exception as e:
-            logger.warning(f"Sync[p{pid}]: Jellyfin failed: {e}")
+            # Transient failure — keep existing rows rather than wiping to empty.
+            logger.warning(f"Sync[p{pid}]: Jellyfin failed (keeping existing): {e}")
+    else:
+        # Profile isn't linked to Jellyfin — clear any stale Jellyfin rows.
+        await database.replace_watched_source(pid, "jellyfin", [])
 
     # Plex — per-profile token if linked, else global token for the default profile
     plex_token = profile.get("plex_token") or (settings.plex_token if is_default else None)
@@ -649,6 +752,10 @@ async def refresh_profile(profile_id: int):
     logger.info(f"=== Prefetch[p{profile_id}] '{profile['name']}' ===")
 
     await sync_watch_state(profile)
+
+    # Warm the Watching page's show-detail cache in the background so it loads
+    # from cache instead of fetching every in-progress show from TMDB on open.
+    asyncio.create_task(_warm_watching_cache(profile_id))
 
     history, reddit_posts = await asyncio.gather(
         _gather_history(profile_id),

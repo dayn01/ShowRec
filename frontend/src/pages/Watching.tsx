@@ -33,22 +33,21 @@ export default function Watching() {
   const [query, setQuery] = useState("");
 
   useEffect(() => {
-    if (partiallyWatchedIds.length === 0) return;
+    if (partiallyWatchedIds.length === 0) { setShows([]); return; }
     setLoading(true);
-    Promise.all(
-      partiallyWatchedIds.map(id =>
-        api.getDetails("tv", id).catch(() => null)
-      )
-    ).then(results => {
-      const valid = results.filter(Boolean) as ShowDetail[];
-      setShows(valid);
-      // Seed TMDB episode counts into context so progress bars are accurate
-      valid.forEach(show => {
-        if (show.seasons?.length) {
-          initSeasonTotals(show.id, show.seasons as any);
-        }
-      });
-    }).finally(() => setLoading(false));
+    // One batched request instead of one per show — far faster with a long list.
+    api.getDetailsBatch(partiallyWatchedIds)
+      .then(({ shows: valid }) => {
+        setShows(valid as ShowDetail[]);
+        // Seed TMDB episode counts into context so progress bars are accurate
+        valid.forEach((show: any) => {
+          if (show.seasons?.length) {
+            initSeasonTotals(show.id, show.seasons);
+          }
+        });
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
   }, [partiallyWatchedIds.join(",")]);
 
   // Only show shows that still have unwatched episodes (progress = "partial")
