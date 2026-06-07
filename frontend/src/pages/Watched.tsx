@@ -13,6 +13,7 @@ export default function Watched() {
   const [tab, setTab] = useState<SubTab>("tv");
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<{ id: number; mediaType: string } | null>(null);
+  const [visibleCount, setVisibleCount] = useState(40);
 
   useEffect(() => {
     api.getWatchedLibrary()
@@ -20,6 +21,9 @@ export default function Watched() {
       .catch(() => setItems([]))
       .finally(() => setLoading(false));
   }, []);
+
+  // Reset the visible window when the tab or search changes
+  useEffect(() => { setVisibleCount(40); }, [tab, query]);
 
   // Reactively drop items that get unmarked while viewing
   const stillWatched = (i: Recommendation) =>
@@ -30,6 +34,7 @@ export default function Watched() {
     .filter(i => i.media_type === tab)
     .filter(stillWatched)
     .filter(i => !q || (i.title || i.name || "").toLowerCase().includes(q));
+  const shown = visible.slice(0, visibleCount);
 
   const tvCount = items.filter(i => i.media_type === "tv" && stillWatched(i)).length;
   const movieCount = items.filter(i => i.media_type === "movie" && stillWatched(i)).length;
@@ -88,11 +93,23 @@ export default function Watched() {
       )}
 
       <div className="media-grid">
-        {visible.map(item => (
+        {shown.map(item => (
           <MediaCard key={`${item.media_type}-${item.id}`} item={item}
             onClick={() => setSelected({ id: item.id, mediaType: item.media_type })} />
         ))}
       </div>
+
+      {visible.length > shown.length && (
+        <div style={{ display: "flex", justifyContent: "center", marginTop: 28 }}>
+          <button onClick={() => setVisibleCount(c => c + 40)} style={{
+            padding: "10px 32px", borderRadius: 20, border: "1px solid var(--border)",
+            background: "var(--surface2)", color: "var(--text)", fontWeight: 600,
+            fontSize: 14, cursor: "pointer",
+          }}>
+            Load more ({visible.length - shown.length} more)
+          </button>
+        </div>
+      )}
 
       {selected && (
         <DetailModal tmdbId={selected.id} mediaType={selected.mediaType} onClose={() => setSelected(null)} />

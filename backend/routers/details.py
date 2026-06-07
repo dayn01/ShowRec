@@ -123,7 +123,8 @@ def _trim_for_watching(show: dict) -> dict:
     return {
         "id": show.get("id"),
         "title": show.get("title"),
-        "poster_url": show.get("poster_url"),
+        # Small thumbnail for the list — the full poster loads only on click.
+        "poster_url": tmdb.sized_poster(show.get("poster_url"), "w154"),
         "vote_average": show.get("vote_average"),
         "status": show.get("status"),
         "networks": show.get("networks", []),

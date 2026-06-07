@@ -595,34 +595,36 @@ async def _cache_show_seasons(tmdb_id: int, all_seasons: bool = True):
         logger.warning(f"Failed to cache show {tmdb_id}: {e}")
 
 
-async def _warm_watching_cache(profile_id: int):
+async def _warm_watched_cache(profile_id: int):
     """
-    Ensure show DETAILS (incl. season episode counts) are cached for every show
-    this profile has episodes watched in, so the Watching page serves entirely
-    from the local cache. Only the show record is fetched (not each season's
-    episodes — that's the heavy part), and already-cached shows are skipped, so
-    this is cheap once warm. The Netflix importer doesn't populate this cache,
-    which is why a freshly-imported library loads slowly the first time.
+    Cache show/movie DETAILS (incl. posters + season episode counts) for
+    everything this profile has watched, so the Watched and Watching pages serve
+    from the local cache instead of fetching hundreds of items from TMDB on page
+    load. Only the record is fetched (not each season's episodes — the heavy
+    part), and already-cached items are skipped, so it's cheap once warm. The
+    Netflix importer doesn't populate this cache, which is why a freshly-imported
+    library loads slowly (or empty) the first time.
     """
-    show_ids = list((await database.max_watched_season_by_show(profile_id)).keys())
-    if not show_ids:
-        return
+    items = await database.get_watched_for_recommendations(profile_id)
     have = await database.cached_show_ids()
-    missing = [s for s in show_ids if s not in have][:500]
+    missing = [
+        (i["tmdb_id"], "tv" if i["media_type"] == "tv" else "movie")
+        for i in items if i.get("tmdb_id") and i["tmdb_id"] not in have
+    ][:800]
     if not missing:
         return
-    logger.info(f"Warm[p{profile_id}]: caching details for {len(missing)} watching shows")
+    logger.info(f"Warm[p{profile_id}]: caching details for {len(missing)} watched titles")
     sem = asyncio.Semaphore(6)
 
-    async def warm(tmdb_id):
+    async def warm(tmdb_id, media_type):
         async with sem:
             try:
-                await _fetch_and_cache_show(tmdb_id, "tv")
+                await _fetch_and_cache_show(tmdb_id, media_type)
             except Exception:
                 pass
 
-    await asyncio.gather(*[warm(s) for s in missing])
-    logger.info(f"Warm[p{profile_id}]: watching-show cache warmed")
+    await asyncio.gather(*[warm(t, mt) for t, mt in missing])
+    logger.info(f"Warm[p{profile_id}]: watched-detail cache warmed")
 
 
 async def _cache_watched_shows(history: list[dict]):
@@ -753,9 +755,9 @@ async def refresh_profile(profile_id: int):
 
     await sync_watch_state(profile)
 
-    # Warm the Watching page's show-detail cache in the background so it loads
-    # from cache instead of fetching every in-progress show from TMDB on open.
-    asyncio.create_task(_warm_watching_cache(profile_id))
+    # Warm the Watched/Watching pages' detail cache in the background so they
+    # load from cache instead of fetching hundreds of titles from TMDB on open.
+    asyncio.create_task(_warm_watched_cache(profile_id))
 
     history, reddit_posts = await asyncio.gather(
         _gather_history(profile_id),

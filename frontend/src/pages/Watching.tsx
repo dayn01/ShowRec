@@ -31,6 +31,7 @@ export default function Watching() {
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState<number | null>(null);
   const [query, setQuery] = useState("");
+  const [visibleCount, setVisibleCount] = useState(40);
 
   useEffect(() => {
     if (partiallyWatchedIds.length === 0) { setShows([]); return; }
@@ -50,12 +51,16 @@ export default function Watching() {
       .finally(() => setLoading(false));
   }, [partiallyWatchedIds.join(",")]);
 
+  // Reset the visible window when the search changes
+  useEffect(() => { setVisibleCount(40); }, [query]);
+
   // Only show shows that still have unwatched episodes (progress = "partial")
   const allInProgress = shows.filter(show => showProgress(show.id) === "partial" && !isDismissed(show.id));
   const q = query.trim().toLowerCase();
   const inProgressShows = q
     ? allInProgress.filter(s => (s.title || "").toLowerCase().includes(q))
     : allInProgress;
+  const shownShows = inProgressShows.slice(0, visibleCount);
 
   if (!loading && partiallyWatchedIds.length === 0) {
     return (
@@ -113,7 +118,7 @@ export default function Watching() {
       )}
 
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        {inProgressShows.map(show => {
+        {shownShows.map(show => {
           const score = Math.round((show.vote_average ?? 0) * 10);
           const scoreColor = score >= 75 ? "var(--green)" : score >= 55 ? "var(--yellow)" : "var(--red)";
 
@@ -151,6 +156,8 @@ export default function Watching() {
                 <img
                   src={show.poster_url || PLACEHOLDER}
                   alt={show.title}
+                  loading="lazy"
+                  decoding="async"
                   style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
                   onError={e => { (e.target as HTMLImageElement).src = PLACEHOLDER; }}
                 />
@@ -207,6 +214,18 @@ export default function Watching() {
           );
         })}
       </div>
+
+      {inProgressShows.length > shownShows.length && (
+        <div style={{ display: "flex", justifyContent: "center", marginTop: 24 }}>
+          <button onClick={() => setVisibleCount(c => c + 40)} style={{
+            padding: "10px 32px", borderRadius: 20, border: "1px solid var(--border)",
+            background: "var(--surface2)", color: "var(--text)", fontWeight: 600,
+            fontSize: 14, cursor: "pointer",
+          }}>
+            Load more ({inProgressShows.length - shownShows.length} more)
+          </button>
+        </div>
+      )}
 
       {selected && (
         <DetailModal

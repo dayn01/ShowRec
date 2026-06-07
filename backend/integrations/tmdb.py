@@ -171,3 +171,9 @@ async def discover(media_type: str, *, genres: list[int] = None, keywords: list[
 
 def poster_url(path: Optional[str]) -> Optional[str]:
     return f"{IMAGE_BASE}{path}" if path else None
+
+
+def sized_poster(url: Optional[str], size: str = "w154") -> Optional[str]:
+    """Swap a stored w500 poster URL down to a smaller TMDB size — used for list
+    thumbnails so the browser downloads ~10 KB instead of ~80 KB per card."""
+    return url.replace("/t/p/w500/", f"/t/p/{size}/") if url else None

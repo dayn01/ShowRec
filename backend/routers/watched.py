@@ -204,9 +204,13 @@ async def get_watch_sources(pid: int = Depends(get_profile_id)):
 
 @router.get("/library")
 async def get_watched_library(pid: int = Depends(get_profile_id)):
-    """Fully-watched movies + shows, enriched with posters for the Watched page."""
-    import asyncio
-    from routers.details import _fetch_and_cache_show
+    """
+    Fully-watched movies + shows for the Watched page. Served entirely from the
+    show cache in one bulk query — with hundreds of watched titles, fetching the
+    uncached ones from TMDB on the request path would stall the page (and did).
+    Missing posters fill in on the next load once the background warmer caches
+    them; titles always show (from watch_state).
+    """
     rows = await database.get_watched_library(pid)
 
     # Also include shows fully watched via episodes (no explicit show-level mark)
@@ -216,15 +220,12 @@ async def get_watched_library(pid: int = Depends(get_profile_id)):
         if ("tv", tid) not in existing:
             rows.append({"tmdb_id": tid, "media_type": "tv", "title": ""})
 
-    async def enrich(row):
+    cache = await database.get_shows_bulk([r["tmdb_id"] for r in rows])
+    items = []
+    for row in rows:
         tmdb_id, mt = row["tmdb_id"], row["media_type"]
-        cached = await database.get_show(tmdb_id)
-        if not cached:
-            try:
-                cached = await _fetch_and_cache_show(tmdb_id, mt)
-            except Exception:
-                cached = None
-        return {
+        cached = cache.get(tmdb_id)
+        items.append({
             "id": tmdb_id,
             "media_type": mt,
             "title": (cached and (cached.get("title") or cached.get("name"))) or row["title"] or "Unknown",
@@ -233,10 +234,8 @@ async def get_watched_library(pid: int = Depends(get_profile_id)):
             "overview": cached.get("overview", "") if cached else "",
             "release_date": cached.get("release_date") if cached else None,
             "first_air_date": cached.get("first_air_date") if cached else None,
-        }
-
-    items = await asyncio.gather(*[enrich(r) for r in rows])
-    return {"items": list(items)}
+        })
+    return {"items": items}
 
 
 # ── "Not interested" dismissals ───────────────────────────────────────────────

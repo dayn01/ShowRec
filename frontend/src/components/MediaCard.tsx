@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Recommendation, api } from "../api";
+import { Recommendation, api, thumb } from "../api";
 import { useWatched } from "../WatchedContext";
 import { useIsMobile } from "../useIsMobile";
 
@@ -107,8 +107,10 @@ export default function MediaCard({ item, onClick, onMarkedSeen, fading, onSimil
     >
       <div style={{ position: "relative", aspectRatio: "2/3", overflow: "hidden" }}>
         <img
-          src={item.poster_url || PLACEHOLDER}
+          src={thumb(item.poster_url, "w342") || PLACEHOLDER}
           alt={title}
+          loading="lazy"
+          decoding="async"
           style={{ width: "100%", height: "100%", objectFit: "cover" }}
           onError={e => { (e.target as HTMLImageElement).src = PLACEHOLDER; }}
         />

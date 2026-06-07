@@ -681,6 +681,28 @@ async def cached_show_ids() -> set[int]:
             return {r[0] for r in await cur.fetchall()}
 
 
+async def get_shows_bulk(tmdb_ids: list[int]) -> dict[int, dict]:
+    """
+    Bulk-fetch cached show/movie data (any age) for many ids in one query —
+    used by pages that show hundreds of items (Watched library) so they read
+    posters from cache instead of fetching each from TMDB on the request path.
+    """
+    out: dict[int, dict] = {}
+    if not tmdb_ids:
+        return out
+    async with aiosqlite.connect(DB_PATH) as db:
+        # Chunk under SQLite's parameter limit (~999).
+        for i in range(0, len(tmdb_ids), 800):
+            chunk = tmdb_ids[i:i + 800]
+            qmarks = ",".join("?" * len(chunk))
+            async with db.execute(
+                f"SELECT tmdb_id, data FROM shows WHERE tmdb_id IN ({qmarks})", chunk
+            ) as cur:
+                for tid, data in await cur.fetchall():
+                    out[tid] = json.loads(data)
+    return out
+
+
 async def set_show(tmdb_id: int, media_type: str, data: dict):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(

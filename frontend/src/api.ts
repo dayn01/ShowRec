@@ -1,5 +1,15 @@
 const BASE = "/api";
 
+// Swap a TMDB w500 poster URL down to a smaller size for list/grid thumbnails,
+// so the browser downloads far less. Full-size posters are only used in the
+// detail view. Non-TMDB / missing URLs pass through unchanged.
+export function thumb(
+  url: string | null | undefined,
+  size: "w92" | "w154" | "w185" | "w342" = "w342",
+): string | null {
+  return url ? url.replace("/t/p/w500/", `/t/p/${size}/`) : null;
+}
+
 // Active profile id (per-device), sent on every request.
 export function getProfileId(): number {
   return parseInt(localStorage.getItem("activeProfileId") || "1") || 1;

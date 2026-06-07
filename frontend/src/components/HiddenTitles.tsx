@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api } from "../api";
+import { api, thumb } from "../api";
 import { useWatched } from "../WatchedContext";
 
 const PLACEHOLDER = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='60' height='90'%3E%3Crect width='60' height='90' fill='%231a1a24'/%3E%3C/svg%3E";
@@ -133,8 +133,10 @@ export default function HiddenTitles({ onClose }: { onClose: () => void }) {
               padding: "8px 10px", borderRadius: 10,
             }}>
               <img
-                src={item.poster_url || PLACEHOLDER}
+                src={thumb(item.poster_url, "w92") || PLACEHOLDER}
                 alt={item.title}
+                loading="lazy"
+                decoding="async"
                 style={{ width: 40, height: 60, objectFit: "cover", borderRadius: 6, flexShrink: 0 }}
                 onError={e => { (e.target as HTMLImageElement).src = PLACEHOLDER; }}
               />

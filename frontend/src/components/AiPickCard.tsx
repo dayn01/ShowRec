@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Recommendation, api } from "../api";
+import { Recommendation, api, thumb } from "../api";
 import { useWatched } from "../WatchedContext";
 
 const PLACEHOLDER = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='300'%3E%3Crect width='200' height='300' fill='%231a1a24'/%3E%3C/svg%3E";
@@ -66,8 +66,10 @@ export default function AiPickCard({ item, onClick }: Props) {
       {/* Poster */}
       <div style={{ position: "relative", width: 90, flexShrink: 0 }}>
         <img
-          src={item.poster_url || PLACEHOLDER}
+          src={thumb(item.poster_url, "w185") || PLACEHOLDER}
           alt={title}
+          loading="lazy"
+          decoding="async"
           style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
           onError={e => { (e.target as HTMLImageElement).src = PLACEHOLDER; }}
         />
