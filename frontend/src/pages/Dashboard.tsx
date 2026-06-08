@@ -243,7 +243,7 @@ function LoadMoreBtn({ onClick, loading, hasMore }: { onClick: () => void; loadi
 
 // ── Main page ────────────────────────────────────────────────────────────────
 export default function Dashboard() {
-  const { isWatched, showProgress, isDismissed } = useWatched();
+  const { isWatched, showProgress, isDismissed, isWatchlisted } = useWatched();
   const [tab, setTab] = useState<Tab>("for-you");
   const [selected, setSelected] = useState<{ id: number; mediaType: string } | null>(null);
   const [genreFilter, setGenreFilter] = useState<string[]>([]);
@@ -252,11 +252,12 @@ export default function Dashboard() {
   const [forYouMeta, setForYouMeta] = useState<{ top_genres?: string[]; based_on?: number; trakt_blended?: boolean; tastedive_blended?: boolean; ai_blended?: boolean } | null>(null);
   const [aiEnabled, setAiEnabled] = useState(true);
   const [tuning, setTuning] = useState(false);
-  // After "Mark Seen", keep the card around briefly (showing ✓ Seen) then fade it out.
+  // After "Mark Seen" or "+ Watchlist", keep the card briefly (showing its new
+  // state) then fade it out before it's filtered from the grid.
   const [lingering, setLingering] = useState<Set<number>>(new Set());
   const [fadingOut, setFadingOut] = useState<Set<number>>(new Set());
 
-  function handleMarkedSeen(id: number) {
+  function lingerAndFade(id: number) {
     setLingering(prev => new Set(prev).add(id));
     window.setTimeout(() => setFadingOut(prev => new Set(prev).add(id)), 1400);
     window.setTimeout(() => {
@@ -305,7 +306,7 @@ export default function Dashboard() {
   // Exception: a show flagged new_season is resurfaced (it has a new season),
   // so it shows even when watched — but "not interested" still hides it.
   const notWatched = (i: any) =>
-    !isDismissed(i.id) &&
+    !isDismissed(i.id) && !isWatchlisted(i.id) &&
     (i.new_season ||
       (i.media_type === "tv" ? showProgress(i.id) !== "full" : !isWatched(i.id)));
 
@@ -398,7 +399,8 @@ export default function Dashboard() {
             {displayItems.map((item: any) => (
               <MediaCard key={item.id} item={item}
                 fading={fadingOut.has(item.id)}
-                onMarkedSeen={() => handleMarkedSeen(item.id)}
+                onMarkedSeen={() => lingerAndFade(item.id)}
+                onWatchlisted={() => lingerAndFade(item.id)}
                 onClick={() => setSelected({ id: item.id, mediaType: item.media_type })} />
             ))}
           </div>
