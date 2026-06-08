@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Query, Depends
 from integrations import trakt, jellyfin, plex, tmdb
 from recommender import get_recommendations, build_genre_profile
+from constants import GENRE_MAP
 from config import settings
 from deps import get_profile_id, pkey
 import database
@@ -32,7 +33,6 @@ def _apply_rec_settings(recs: list[dict], settings: dict) -> list[dict]:
     if genre_weight == 1.0 and not multipliers:
         return recs
 
-    from prefetch import GENRE_MAP  # lazy import avoids a circular import at load
     out: list[dict] = []
     for item in recs:
         base = item.get("base_score", item.get("score", 0) or 0)

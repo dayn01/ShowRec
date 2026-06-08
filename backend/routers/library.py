@@ -3,6 +3,7 @@ from fastapi import APIRouter, Query, HTTPException, Depends
 from pydantic import BaseModel
 from integrations import tmdb
 from deps import get_profile_id, pkey
+from constants import GENRE_MAP
 from config import settings
 import database
 import asyncio
@@ -112,7 +113,6 @@ async def search(q: str = Query(..., min_length=1), type: str = Query("multi", p
     # Personalisation: within a relevance bucket, prefer titles closer to the
     # profile's taste (genre affinity, scaled + reweighted by the Tune settings),
     # then popularity. Relevance stays primary so exact matches never get buried.
-    from prefetch import GENRE_MAP  # lazy import avoids a circular import at load
     rec_settings = await database.get_rec_settings(pid)
     genre_weight = rec_settings.get("genre_weight", 1.0)
     multipliers = rec_settings.get("genre_multipliers") or {}
