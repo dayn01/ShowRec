@@ -5,6 +5,7 @@ data/
 
 # Personal server-side setup — kept local, not part of the shareable app
 arr-stack/
+media-stack/
 
 # Python
 backend/venv/
