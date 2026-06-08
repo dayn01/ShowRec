@@ -32,6 +32,7 @@ async def lifespan(app: FastAPI):
 
     yield
     scheduler.scheduler.shutdown()
+    await database.close()
 
 
 app = FastAPI(title="Show Recommendation App", lifespan=lifespan)

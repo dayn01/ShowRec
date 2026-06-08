@@ -3,6 +3,8 @@ SQLite persistent cache for all app data.
 Database: ../showrec_cache.db (project root)
 """
 import aiosqlite
+import asyncio
+import contextlib
 import json
 import time
 import os
@@ -21,6 +23,40 @@ TTL = {
     "upcoming":        3600,        # 1h
     "similar":         86400,       # 24h (TasteDive + TMDB resolution)
 }
+
+
+# ── Shared connection ─────────────────────────────────────────────────────────
+# One long-lived connection for the whole process instead of opening a fresh one
+# per call. SQLite is single-writer anyway; this removes per-call connect churn.
+_shared_db: aiosqlite.Connection | None = None
+_db_init_lock = asyncio.Lock()
+
+
+async def _get_db() -> aiosqlite.Connection:
+    global _shared_db
+    if _shared_db is None:
+        async with _db_init_lock:
+            if _shared_db is None:
+                conn = await aiosqlite.connect(DB_PATH, timeout=30)
+                await conn.execute("PRAGMA journal_mode=WAL")     # concurrent reads
+                await conn.execute("PRAGMA busy_timeout=5000")
+                _shared_db = conn
+    return _shared_db
+
+
+@contextlib.asynccontextmanager
+async def _conn():
+    """Yield the shared connection (kept open for the process lifetime)."""
+    db = await _get_db()
+    yield db
+
+
+async def close():
+    """Close the shared connection (called on app shutdown)."""
+    global _shared_db
+    if _shared_db is not None:
+        await _shared_db.close()
+        _shared_db = None
 
 
 async def _has_column(db, table: str, column: str) -> bool:
@@ -98,7 +134,7 @@ async def _migrate_add_profiles(db):
 
 
 async def init():
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _conn() as db:
         await db.executescript("""
             CREATE TABLE IF NOT EXISTS shows (
                 tmdb_id     INTEGER PRIMARY KEY,
@@ -188,7 +224,7 @@ async def init():
 # ── Profiles ──────────────────────────────────────────────────────────────────
 
 async def list_profiles() -> list[dict]:
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _conn() as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
             "SELECT id, name, emoji, jellyfin_user_id, plex_token, trakt_token FROM profiles ORDER BY id"
@@ -197,7 +233,7 @@ async def list_profiles() -> list[dict]:
 
 
 async def get_profile(profile_id: int) -> dict | None:
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _conn() as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
             "SELECT id, name, emoji, jellyfin_user_id, plex_token, trakt_token FROM profiles WHERE id=?",
@@ -209,7 +245,7 @@ async def get_profile(profile_id: int) -> dict | None:
 
 async def create_profile(name: str, emoji: str = "👤", jellyfin_user_id: str | None = None,
                          plex_token: str | None = None, trakt_token: str | None = None) -> dict:
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _conn() as db:
         cur = await db.execute(
             "INSERT INTO profiles (name, emoji, jellyfin_user_id, plex_token, trakt_token, created_at) VALUES (?,?,?,?,?,?)",
             (name, emoji, jellyfin_user_id or None, plex_token or None, trakt_token or None, int(time.time()))
@@ -225,7 +261,7 @@ async def update_profile(profile_id: int, **fields):
     if not sets:
         return
     cols = ", ".join(f"{k}=?" for k in sets)
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _conn() as db:
         await db.execute(f"UPDATE profiles SET {cols} WHERE id=?", (*sets.values(), profile_id))
         await db.commit()
 
@@ -237,7 +273,7 @@ async def upsert_default_profile(name: str = "Me", emoji: str = "🍿",
     Jellyfin link. Creates it if missing, otherwise updates those fields. Used by
     the setup wizard so finishing setup always leaves a usable, linked profile.
     """
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _conn() as db:
         async with db.execute("SELECT 1 FROM profiles WHERE id=1") as cur:
             exists = await cur.fetchone() is not None
         if exists:
@@ -255,7 +291,7 @@ async def upsert_default_profile(name: str = "Me", emoji: str = "🍿",
 
 
 async def delete_profile(profile_id: int):
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _conn() as db:
         for t in ("watch_state", "dismissed", "watchlist"):
             await db.execute(f"DELETE FROM {t} WHERE profile_id=?", (profile_id,))
         await db.execute("DELETE FROM profiles WHERE id=?", (profile_id,))
@@ -263,14 +299,14 @@ async def delete_profile(profile_id: int):
 
 
 async def all_profile_ids() -> list[int]:
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _conn() as db:
         async with db.execute("SELECT id FROM profiles ORDER BY id") as cur:
             return [r[0] for r in await cur.fetchall()]
 
 
 async def get_rec_settings(profile_id: int) -> dict:
     """Per-profile recommendation tuning ({} when unset)."""
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _conn() as db:
         async with db.execute("SELECT rec_settings FROM profiles WHERE id=?", (profile_id,)) as cur:
             row = await cur.fetchone()
     if not row or not row[0]:
@@ -282,7 +318,7 @@ async def get_rec_settings(profile_id: int) -> dict:
 
 
 async def set_rec_settings(profile_id: int, settings: dict):
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _conn() as db:
         await db.execute(
             "UPDATE profiles SET rec_settings=? WHERE id=?",
             (json.dumps(settings), profile_id)
@@ -293,7 +329,7 @@ async def set_rec_settings(profile_id: int, settings: dict):
 # ── Dismissals ("not interested") ─────────────────────────────────────────────
 
 async def add_dismissed(profile_id: int, tmdb_id: int, media_type: str, title: str = ""):
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _conn() as db:
         await db.execute(
             "INSERT OR REPLACE INTO dismissed (profile_id, tmdb_id, media_type, title, dismissed_at) VALUES (?,?,?,?,?)",
             (profile_id, tmdb_id, "tv" if media_type == "tv" else "movie", title, int(time.time()))
@@ -302,13 +338,13 @@ async def add_dismissed(profile_id: int, tmdb_id: int, media_type: str, title: s
 
 
 async def remove_dismissed(profile_id: int, tmdb_id: int):
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _conn() as db:
         await db.execute("DELETE FROM dismissed WHERE profile_id=? AND tmdb_id=?", (profile_id, tmdb_id))
         await db.commit()
 
 
 async def get_dismissed_ids(profile_id: int) -> list[int]:
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _conn() as db:
         async with db.execute("SELECT tmdb_id FROM dismissed WHERE profile_id=?", (profile_id,)) as cur:
             return [r[0] for r in await cur.fetchall()]
 
@@ -316,7 +352,7 @@ async def get_dismissed_ids(profile_id: int) -> list[int]:
 # ── Watchlist ─────────────────────────────────────────────────────────────────
 
 async def add_watchlist(profile_id: int, item: dict):
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _conn() as db:
         await db.execute(
             """INSERT OR REPLACE INTO watchlist
                (profile_id, tmdb_id, media_type, title, poster_url, vote_average, overview, release_date, added_at)
@@ -332,13 +368,13 @@ async def add_watchlist(profile_id: int, item: dict):
 
 
 async def remove_watchlist(profile_id: int, tmdb_id: int):
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _conn() as db:
         await db.execute("DELETE FROM watchlist WHERE profile_id=? AND tmdb_id=?", (profile_id, tmdb_id))
         await db.commit()
 
 
 async def get_watchlist(profile_id: int) -> list[dict]:
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _conn() as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
             """SELECT tmdb_id, media_type, title, poster_url, vote_average, overview, release_date
@@ -355,26 +391,26 @@ async def get_watchlist(profile_id: int) -> list[dict]:
 
 
 async def get_watchlist_ids(profile_id: int) -> list[int]:
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _conn() as db:
         async with db.execute("SELECT tmdb_id FROM watchlist WHERE profile_id=?", (profile_id,)) as cur:
             return [r[0] for r in await cur.fetchall()]
 
 
 async def get_dismissed_full(profile_id: int) -> list[dict]:
     """Dismissed items with title + poster (from the shows cache when available)."""
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _conn() as db:
         async with db.execute(
             "SELECT tmdb_id, media_type, title, dismissed_at FROM dismissed WHERE profile_id=? ORDER BY dismissed_at DESC",
             (profile_id,)
         ) as cur:
             rows = await cur.fetchall()
 
+    shows = await get_shows_bulk([r[0] for r in rows])   # one query instead of N
     items = []
     for tmdb_id, media_type, title, _ in rows:
-        poster = None
-        cached = await get_show(tmdb_id)
+        cached = shows.get(tmdb_id)
+        poster = cached.get("poster_url") if cached else None
         if cached:
-            poster = cached.get("poster_url")
             title = title or cached.get("title") or cached.get("name")
         items.append({
             "tmdb_id": tmdb_id, "media_type": media_type,
@@ -387,7 +423,7 @@ async def get_dismissed_full(profile_id: int) -> list[dict]:
 
 async def mark_watched(profile_id: int, media_type: str, tmdb_id: int, season: int = -1,
                        episode: int = -1, title: str = "", source: str = "user"):
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _conn() as db:
         await db.execute(
             """INSERT OR REPLACE INTO watch_state
                (profile_id, media_type, tmdb_id, season_number, episode_number, title, watched_at, source)
@@ -401,7 +437,7 @@ async def mark_episodes_bulk(profile_id: int, tmdb_id: int, season: int, episode
                              title: str = "", source: str = "user"):
     now = int(time.time())
     rows = [(profile_id, "episode", tmdb_id, season, ep, title, now, source) for ep in episode_numbers]
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _conn() as db:
         await db.executemany(
             """INSERT OR REPLACE INTO watch_state
                (profile_id, media_type, tmdb_id, season_number, episode_number, title, watched_at, source)
@@ -419,7 +455,7 @@ async def sync_watched_bulk(profile_id: int, rows: list[tuple]):
     """
     now = int(time.time())
     full_rows = [(profile_id, r[0], r[1], r[2], r[3], r[4], now, r[5]) for r in rows]
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _conn() as db:
         await db.executemany(
             """INSERT OR IGNORE INTO watch_state
                (profile_id, media_type, tmdb_id, season_number, episode_number, title, watched_at, source)
@@ -441,7 +477,7 @@ async def replace_watched_source(profile_id: int, source: str, rows: list[tuple]
     """
     now = int(time.time())
     full = [(profile_id, r[0], r[1], r[2], r[3], r[4], now, source) for r in rows]
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _conn() as db:
         await db.execute(
             "DELETE FROM watch_state WHERE profile_id=? AND source=?", (profile_id, source)
         )
@@ -456,7 +492,7 @@ async def replace_watched_source(profile_id: int, source: str, rows: list[tuple]
 
 
 async def unmark_watched(profile_id: int, media_type: str, tmdb_id: int, season: int = -1, episode: int = -1):
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _conn() as db:
         await db.execute(
             """DELETE FROM watch_state
                WHERE profile_id=? AND media_type=? AND tmdb_id=? AND season_number=? AND episode_number=?""",
@@ -467,7 +503,7 @@ async def unmark_watched(profile_id: int, media_type: str, tmdb_id: int, season:
 
 async def unmark_season(profile_id: int, tmdb_id: int, season: int):
     """Remove a season-level mark and all its episode rows."""
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _conn() as db:
         await db.execute(
             "DELETE FROM watch_state WHERE profile_id=? AND tmdb_id=? AND season_number=? AND media_type='episode'",
             (profile_id, tmdb_id, season)
@@ -476,14 +512,14 @@ async def unmark_season(profile_id: int, tmdb_id: int, season: int):
 
 
 async def unmark_show(profile_id: int, tmdb_id: int):
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _conn() as db:
         await db.execute("DELETE FROM watch_state WHERE profile_id=? AND tmdb_id=?", (profile_id, tmdb_id))
         await db.commit()
 
 
 async def get_watch_state(profile_id: int) -> dict:
     """Returns the full local watch state for the frontend."""
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _conn() as db:
         async with db.execute(
             "SELECT media_type, tmdb_id, season_number, episode_number FROM watch_state WHERE profile_id=?",
             (profile_id,)
@@ -564,7 +600,7 @@ async def get_watched_library(profile_id: int) -> list[dict]:
     Fully-watched items for the Watched page: movies + explicit show-level marks.
     Returns [{tmdb_id, media_type('movie'|'tv'), title}], most-recent first.
     """
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _conn() as db:
         async with db.execute(
             """SELECT media_type, tmdb_id, title, MAX(watched_at) AS w
                FROM watch_state
@@ -584,7 +620,7 @@ async def get_watched_for_recommendations(profile_id: int) -> list[dict]:
     Returns unique watched titles for the recommender, most-recent first.
     Movies as media_type 'movie', shows (any episode/show row) as 'tv'.
     """
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _conn() as db:
         async with db.execute(
             """SELECT media_type, tmdb_id, title, MAX(watched_at) AS last_watched
                FROM watch_state WHERE profile_id=?
@@ -605,7 +641,7 @@ async def max_watched_season_by_show(profile_id: int) -> dict[int, int]:
     tmdb_id -> the highest season number this profile has any watched episode in.
     Used to detect "a new season is out that you haven't started".
     """
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _conn() as db:
         async with db.execute(
             "SELECT tmdb_id, MAX(season_number) FROM watch_state "
             "WHERE profile_id=? AND media_type='episode' GROUP BY tmdb_id",
@@ -615,7 +651,7 @@ async def max_watched_season_by_show(profile_id: int) -> dict[int, int]:
 
 
 async def get_watch_state_stats(profile_id: int) -> dict:
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _conn() as db:
         async with db.execute(
             "SELECT source, COUNT(*) FROM watch_state WHERE profile_id=? GROUP BY source", (profile_id,)
         ) as cur:
@@ -627,7 +663,7 @@ async def get_watch_state_stats(profile_id: int) -> dict:
 
 async def cache_get(key: str, ttl_key: str) -> dict | list | None:
     ttl = TTL.get(ttl_key, 3600)
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _conn() as db:
         async with db.execute("SELECT data, cached_at FROM cache WHERE key=?", (key,)) as cur:
             row = await cur.fetchone()
     if not row:
@@ -639,7 +675,7 @@ async def cache_get(key: str, ttl_key: str) -> dict | list | None:
 
 
 async def cache_set(key: str, value: dict | list):
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _conn() as db:
         await db.execute(
             "INSERT OR REPLACE INTO cache (key, data, cached_at) VALUES (?, ?, ?)",
             (key, json.dumps(value), int(time.time()))
@@ -649,7 +685,7 @@ async def cache_set(key: str, value: dict | list):
 
 async def cache_age(key: str) -> int | None:
     """Returns age in seconds, or None if not cached."""
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _conn() as db:
         async with db.execute("SELECT cached_at FROM cache WHERE key=?", (key,)) as cur:
             row = await cur.fetchone()
     if not row:
@@ -660,7 +696,7 @@ async def cache_age(key: str) -> int | None:
 # ── Shows ─────────────────────────────────────────────────────────────────────
 
 async def get_show(tmdb_id: int, allow_stale: bool = False) -> dict | None:
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _conn() as db:
         async with db.execute("SELECT data, cached_at FROM shows WHERE tmdb_id=?", (tmdb_id,)) as cur:
             row = await cur.fetchone()
     if not row:
@@ -676,7 +712,7 @@ async def get_show(tmdb_id: int, allow_stale: bool = False) -> dict | None:
 async def cached_show_ids() -> set[int]:
     """tmdb_ids currently in the show cache (any age). Lets the warmer skip
     already-cached shows with a single query."""
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _conn() as db:
         async with db.execute("SELECT tmdb_id FROM shows") as cur:
             return {r[0] for r in await cur.fetchall()}
 
@@ -690,7 +726,7 @@ async def get_shows_bulk(tmdb_ids: list[int]) -> dict[int, dict]:
     out: dict[int, dict] = {}
     if not tmdb_ids:
         return out
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _conn() as db:
         # Chunk under SQLite's parameter limit (~999).
         for i in range(0, len(tmdb_ids), 800):
             chunk = tmdb_ids[i:i + 800]
@@ -704,7 +740,7 @@ async def get_shows_bulk(tmdb_ids: list[int]) -> dict[int, dict]:
 
 
 async def set_show(tmdb_id: int, media_type: str, data: dict):
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _conn() as db:
         await db.execute(
             "INSERT OR REPLACE INTO shows (tmdb_id, media_type, data, cached_at) VALUES (?,?,?,?)",
             (tmdb_id, media_type, json.dumps(data), int(time.time()))
@@ -715,7 +751,7 @@ async def set_show(tmdb_id: int, media_type: str, data: dict):
 # ── Seasons ───────────────────────────────────────────────────────────────────
 
 async def get_season(tmdb_id: int, season_number: int) -> dict | None:
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _conn() as db:
         async with db.execute(
             "SELECT data, cached_at FROM seasons WHERE tmdb_id=? AND season_number=?",
             (tmdb_id, season_number)
@@ -729,7 +765,7 @@ async def get_season(tmdb_id: int, season_number: int) -> dict | None:
 
 
 async def set_season(tmdb_id: int, season_number: int, data: dict):
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _conn() as db:
         await db.execute(
             "INSERT OR REPLACE INTO seasons (tmdb_id, season_number, data, cached_at) VALUES (?,?,?,?)",
             (tmdb_id, season_number, json.dumps(data), int(time.time()))
@@ -740,7 +776,7 @@ async def set_season(tmdb_id: int, season_number: int, data: dict):
 # ── Utilities ─────────────────────────────────────────────────────────────────
 
 async def get_all_cached_show_ids() -> list[tuple[int, str]]:
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _conn() as db:
         async with db.execute("SELECT tmdb_id, media_type FROM shows") as cur:
             return await cur.fetchall()
 
@@ -752,7 +788,7 @@ async def wipe_synced_data():
     watch state and the TMDB/recommendation caches; keeps user-curated data
     (profiles, dismissed titles, watchlist).
     """
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _conn() as db:
         for table in ("watch_state", "shows", "seasons", "cache"):
             await db.execute(f"DELETE FROM {table}")
         await db.commit()
@@ -760,7 +796,7 @@ async def wipe_synced_data():
 
 async def purge_stale(older_than_days: int = 30):
     cutoff = int(time.time()) - (older_than_days * 86400)
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _conn() as db:
         await db.execute("DELETE FROM shows   WHERE cached_at < ?", (cutoff,))
         await db.execute("DELETE FROM seasons WHERE cached_at < ?", (cutoff,))
         await db.execute("DELETE FROM cache   WHERE cached_at < ?", (cutoff,))
@@ -768,7 +804,7 @@ async def purge_stale(older_than_days: int = 30):
 
 
 async def get_cache_stats() -> dict:
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _conn() as db:
         async with db.execute("SELECT COUNT(*) FROM shows") as c:
             shows = (await c.fetchone())[0]
         async with db.execute("SELECT COUNT(*) FROM seasons") as c:
