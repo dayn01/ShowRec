@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api";
 import { useWatched } from "../WatchedContext";
+import { useIsMobile } from "../useIsMobile";
 
 type WatchState = "idle" | "loading" | "error";
 
@@ -158,6 +159,7 @@ export default function SeasonRow({ season, tmdbId, showTitle, autoExpand = fals
   });
   const requestEnabled = !!reqStatuses?.enabled;
   const [reqState, setReqState] = useState<"idle" | "sending" | "done" | "error">("idle");
+  const isMobile = useIsMobile();
 
   async function requestSeason(e: React.MouseEvent) {
     e.stopPropagation();
@@ -293,7 +295,8 @@ export default function SeasonRow({ season, tmdbId, showTitle, autoExpand = fals
               disabled={reqState === "sending" || reqState === "done"}
               title="Request this season via Overseerr/Jellyseerr"
               style={{
-                padding: "5px 12px", borderRadius: 20, border: "1px solid var(--border)",
+                padding: isMobile ? "5px 9px" : "5px 12px",
+                borderRadius: 20, border: "1px solid var(--border)",
                 cursor: reqState === "sending" ? "wait" : reqState === "done" ? "default" : "pointer",
                 fontWeight: 600, fontSize: 12, whiteSpace: "nowrap", flexShrink: 0,
                 background: reqState === "error" ? "var(--red)"
@@ -302,10 +305,9 @@ export default function SeasonRow({ season, tmdbId, showTitle, autoExpand = fals
                 transition: "background 0.2s",
               }}
             >
-              {reqState === "sending" ? "Requesting…"
-                : reqState === "error" ? "Error"
-                : reqState === "done" ? "✓ Requested"
-                : "⬇ Request"}
+              {isMobile
+                ? (reqState === "sending" ? "…" : reqState === "error" ? "✕" : reqState === "done" ? "✓" : "⬇")
+                : (reqState === "sending" ? "Requesting…" : reqState === "error" ? "Error" : reqState === "done" ? "✓ Requested" : "⬇ Request")}
             </button>
           )}
           <SeenBtn watched={isFullyWatched} partial={!!isPartial} state={state} onMark={markSeason} onUnmark={unmarkSeason} />
