@@ -47,9 +47,14 @@ function weightLabel(v: number) {
   return "Much more";
 }
 
+const YEAR_FLOOR = 1950;
+const YEAR_CEIL = new Date().getFullYear();
+
 export default function RecSettingsModal({ profileId, topGenres, stats, onClose, onSaved }: Props) {
   const [genreWeight, setGenreWeight] = useState(1);
   const [multipliers, setMultipliers] = useState<Record<string, number>>({});
+  const [minYear, setMinYear] = useState(0);   // 0 = no limit
+  const [maxYear, setMaxYear] = useState(0);   // 0 = no limit
   const [advanced, setAdvanced] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -59,12 +64,29 @@ export default function RecSettingsModal({ profileId, topGenres, stats, onClose,
       .then(s => {
         setGenreWeight(s.genre_weight ?? 1);
         setMultipliers(s.genre_multipliers ?? {});
+        setMinYear(s.min_year ?? 0);
+        setMaxYear(s.max_year ?? 0);
         // Open the advanced section if any per-genre tweak is already set
         if (Object.keys(s.genre_multipliers ?? {}).length > 0) setAdvanced(true);
       })
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [profileId]);
+
+  // Sliders read the year extremes as "Any" (no limit). Keep the range sane.
+  function onMinYear(v: number) {
+    const my = v <= YEAR_FLOOR ? 0 : v;
+    setMinYear(my);
+    if (my && maxYear && my > maxYear) setMaxYear(my);
+  }
+  function onMaxYear(v: number) {
+    const xy = v >= YEAR_CEIL ? 0 : v;
+    setMaxYear(xy);
+    if (xy && minYear && xy < minYear) setMinYear(xy);
+  }
+  const yearLabel = !minYear && !maxYear
+    ? "Any year"
+    : `${minYear || "earliest"} – ${maxYear || "now"}`;
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
@@ -80,12 +102,17 @@ export default function RecSettingsModal({ profileId, topGenres, stats, onClose,
   function reset() {
     setGenreWeight(1);
     setMultipliers({});
+    setMinYear(0);
+    setMaxYear(0);
   }
 
   async function save() {
     setSaving(true);
     try {
-      const body: RecSettings = { genre_weight: genreWeight, genre_multipliers: multipliers };
+      const body: RecSettings = {
+        genre_weight: genreWeight, genre_multipliers: multipliers,
+        min_year: minYear, max_year: maxYear,
+      };
       await api.saveRecSettings(profileId, body);
       onSaved();
       onClose();
@@ -203,6 +230,41 @@ export default function RecSettingsModal({ profileId, topGenres, stats, onClose,
                 onChange={e => setGenreWeight(parseFloat(e.target.value))}
                 style={{ width: "100%", accentColor: "var(--accent)" }}
               />
+            </div>
+
+            {/* Release-year range */}
+            <div style={{ marginTop: 18 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                <label style={{ fontSize: 14, fontWeight: 600 }}>Release year</label>
+                <span style={{ fontSize: 12, color: "var(--accent2)" }}>{yearLabel}</span>
+              </div>
+              <p style={{ fontSize: 12, color: "var(--muted)", margin: "4px 0 10px" }}>
+                Limit the feed to titles from a year range. Drag a slider to its end for no limit.
+              </p>
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                <div>
+                  <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 2 }}>
+                    From: <strong style={{ color: "var(--text)" }}>{minYear || "Any"}</strong>
+                  </div>
+                  <input
+                    type="range" min={YEAR_FLOOR} max={YEAR_CEIL} step={1}
+                    value={minYear || YEAR_FLOOR}
+                    onChange={e => onMinYear(parseInt(e.target.value))}
+                    style={{ width: "100%", accentColor: "var(--accent)" }}
+                  />
+                </div>
+                <div>
+                  <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 2 }}>
+                    To: <strong style={{ color: "var(--text)" }}>{maxYear || "Any"}</strong>
+                  </div>
+                  <input
+                    type="range" min={YEAR_FLOOR} max={YEAR_CEIL} step={1}
+                    value={maxYear || YEAR_CEIL}
+                    onChange={e => onMaxYear(parseInt(e.target.value))}
+                    style={{ width: "100%", accentColor: "var(--accent)" }}
+                  />
+                </div>
+              </div>
             </div>
 
             {/* Advanced: per-genre */}

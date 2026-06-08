@@ -26,15 +26,28 @@ def _apply_rec_settings(recs: list[dict], settings: dict) -> list[dict]:
     Re-rank a profile's cached recommendations using its tuning:
       - genre_weight: scales the learned genre-affinity component (default 1.0)
       - genre_multipliers: {genre name -> factor}; 0 hides the genre entirely
+      - min_year / max_year: keep only titles released in that range (0 = no limit)
     Defaults reproduce the stored ranking exactly (no-op).
     """
     genre_weight = settings.get("genre_weight", 1.0)
     multipliers = settings.get("genre_multipliers") or {}
-    if genre_weight == 1.0 and not multipliers:
+    min_year = settings.get("min_year") or 0
+    max_year = settings.get("max_year") or 0
+    if genre_weight == 1.0 and not multipliers and not min_year and not max_year:
         return recs
 
     out: list[dict] = []
     for item in recs:
+        # Year filter (titles with no known date are kept, not dropped).
+        if min_year or max_year:
+            date = item.get("release_date") or item.get("first_air_date") or ""
+            yr = int(date[:4]) if date[:4].isdigit() else None
+            if yr is not None:
+                if min_year and yr < min_year:
+                    continue
+                if max_year and yr > max_year:
+                    continue
+
         base = item.get("base_score", item.get("score", 0) or 0)
         score = base + genre_weight * item.get("genre_component", 0)
 

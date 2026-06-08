@@ -85,6 +85,8 @@ async def update_profile(profile_id: int, p: ProfileUpdate):
 class RecSettingsIn(BaseModel):
     genre_weight: float = 1.0                       # scales learned genre affinity
     genre_multipliers: dict[str, float] = {}        # genre name -> factor (0 = hide)
+    min_year: int = 0                               # only titles from this year on (0 = no limit)
+    max_year: int = 0                               # only titles up to this year (0 = no limit)
 
 
 @router.get("/{profile_id}/rec-settings")
@@ -95,6 +97,8 @@ async def read_rec_settings(profile_id: int):
     return {
         "genre_weight": s.get("genre_weight", 1.0),
         "genre_multipliers": s.get("genre_multipliers") or {},
+        "min_year": s.get("min_year", 0),
+        "max_year": s.get("max_year", 0),
     }
 
 
@@ -106,7 +110,12 @@ async def write_rec_settings(profile_id: int, s: RecSettingsIn):
     # Only persist genres the user actually moved off the 1.0 default.
     mults = {k: max(0.0, min(2.0, v)) for k, v in s.genre_multipliers.items()
              if abs(v - 1.0) > 1e-9}
-    saved = {"genre_weight": gw, "genre_multipliers": mults}
+    # Sanitise the year range (0 = no limit); ignore an inverted range.
+    my = s.min_year if 1900 <= s.min_year <= 2100 else 0
+    xy = s.max_year if 1900 <= s.max_year <= 2100 else 0
+    if my and xy and my > xy:
+        my = xy
+    saved = {"genre_weight": gw, "genre_multipliers": mults, "min_year": my, "max_year": xy}
     await database.set_rec_settings(profile_id, saved)
     # Tuning is applied on read, so no rebuild needed — the feed re-ranks instantly.
     return saved
