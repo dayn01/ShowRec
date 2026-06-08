@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { api, UpcomingEpisode } from "../api";
+import DetailModal from "../components/DetailModal";
 
 function groupByDate(episodes: UpcomingEpisode[]): Record<string, UpcomingEpisode[]> {
   const groups: Record<string, UpcomingEpisode[]> = {};
@@ -25,6 +26,7 @@ function formatDate(iso: string): string {
 
 export default function Upcoming() {
   const [days, setDays] = useState(30);
+  const [selected, setSelected] = useState<number | null>(null);
   const { data, isLoading, isError } = useQuery({
     queryKey: ["upcoming", days],
     queryFn: () => api.getUpcoming(days),
@@ -105,12 +107,22 @@ export default function Upcoming() {
             </div>
 
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {grouped[date].map((ep, i) => (
-                <div key={i} style={{
-                  background: "var(--surface)", border: "1px solid var(--border)",
-                  borderRadius: 10, padding: "12px 16px",
-                  display: "flex", gap: 16, alignItems: "flex-start",
-                }}>
+              {grouped[date].map((ep, i) => {
+                const tmdbId = ep.show.ids?.tmdb;
+                return (
+                <div key={i}
+                  onClick={() => tmdbId && setSelected(tmdbId)}
+                  title={tmdbId ? "View details" : undefined}
+                  style={{
+                    background: "var(--surface)", border: "1px solid var(--border)",
+                    borderRadius: 10, padding: "12px 16px",
+                    display: "flex", gap: 16, alignItems: "flex-start",
+                    cursor: tmdbId ? "pointer" : "default",
+                    transition: "border-color 0.15s, transform 0.15s",
+                  }}
+                  onMouseEnter={e => { if (tmdbId) (e.currentTarget as HTMLElement).style.borderColor = "var(--accent)"; }}
+                  onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = "var(--border)"; }}
+                >
                   <div style={{
                     minWidth: 48, textAlign: "center",
                     background: "var(--surface2)", borderRadius: 8,
@@ -135,11 +147,16 @@ export default function Upcoming() {
                     )}
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         ))}
       </div>
+
+      {selected && (
+        <DetailModal tmdbId={selected} mediaType="tv" onClose={() => setSelected(null)} />
+      )}
     </div>
   );
 }
