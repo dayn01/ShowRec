@@ -67,11 +67,16 @@ a { color: inherit; text-decoration: none; }
   /* Hide the description / AI reason blurb on phones for compact cards */
   .card-blurb { display: none !important; }
 
-  /* Header: wrap, shrink, scrollable nav */
+  /* Header: wrap, shrink, scrollable nav. Top/side padding clears the iOS
+     notch + status bar (safe-area insets) so content isn't hidden behind it. */
   .app-header {
     height: auto !important;
     min-height: 52px;
-    padding: 8px 12px !important;
+    padding:
+      calc(8px + env(safe-area-inset-top, 0px))
+      calc(12px + env(safe-area-inset-right, 0px))
+      8px
+      calc(12px + env(safe-area-inset-left, 0px)) !important;
     gap: 10px !important;
     flex-wrap: wrap;
   }
@@ -87,7 +92,13 @@ a { color: inherit; text-decoration: none; }
   .app-header-right { margin-left: auto; }
   .app-statusbar { display: none !important; }   /* free up space; status still on cards */
 
-  .main-content { padding: 16px 12px !important; }
+  .main-content {
+    padding:
+      16px
+      calc(12px + env(safe-area-inset-right, 0px))
+      calc(16px + env(safe-area-inset-bottom, 0px))
+      calc(12px + env(safe-area-inset-left, 0px)) !important;
+  }
 
   /* Modals: use the full screen */
   .modal-backdrop { padding: 0 !important; align-items: stretch !important; }

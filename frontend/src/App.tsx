@@ -94,11 +94,12 @@ export default function App() {
       <header className="app-header" style={{
         background: "var(--surface)",
         borderBottom: "1px solid var(--border)",
-        padding: "0 24px",
+        // Pad past the notch/status bar (iOS safe area); grows the header to suit.
+        padding: "env(safe-area-inset-top, 0px) 24px 0",
         display: "flex",
         alignItems: "center",
         gap: isMobile ? 12 : 32,
-        height: 60,
+        height: "calc(60px + env(safe-area-inset-top, 0px))",
         position: "sticky", top: 0, zIndex: 100,
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
