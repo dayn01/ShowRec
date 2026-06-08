@@ -150,6 +150,28 @@ export default function SeasonRow({ season, tmdbId, showTitle, autoExpand = fals
   const watched = isSeasonWatched(tmdbId, season.season_number);
   const progress = seasonProgress(tmdbId, season.season_number);
 
+  // Per-season request (Overseerr/Jellyseerr). Shares the cached enabled flag.
+  const { data: reqStatuses } = useQuery({
+    queryKey: ["request-statuses"],
+    queryFn: api.getRequestStatuses,
+    staleTime: 1000 * 60 * 2,
+  });
+  const requestEnabled = !!reqStatuses?.enabled;
+  const [reqState, setReqState] = useState<"idle" | "sending" | "done" | "error">("idle");
+
+  async function requestSeason(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (reqState === "sending" || reqState === "done") return;
+    setReqState("sending");
+    try {
+      await api.requestMedia(tmdbId, "tv", [season.season_number]);
+      setReqState("done");
+    } catch {
+      setReqState("error");
+      setTimeout(() => setReqState("idle"), 2500);
+    }
+  }
+
   const { data: episodeData, isLoading } = useQuery({
     queryKey: ["season", tmdbId, season.season_number],
     queryFn: () => api.getSeasonEpisodes(tmdbId, season.season_number),
@@ -265,6 +287,27 @@ export default function SeasonRow({ season, tmdbId, showTitle, autoExpand = fals
           )}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+          {requestEnabled && (
+            <button
+              onClick={requestSeason}
+              disabled={reqState === "sending" || reqState === "done"}
+              title="Request this season via Overseerr/Jellyseerr"
+              style={{
+                padding: "5px 12px", borderRadius: 20, border: "1px solid var(--border)",
+                cursor: reqState === "sending" ? "wait" : reqState === "done" ? "default" : "pointer",
+                fontWeight: 600, fontSize: 12, whiteSpace: "nowrap", flexShrink: 0,
+                background: reqState === "error" ? "var(--red)"
+                  : reqState === "done" ? "var(--green)" : "var(--surface2)",
+                color: reqState === "done" ? "#000" : "var(--text)",
+                transition: "background 0.2s",
+              }}
+            >
+              {reqState === "sending" ? "Requesting…"
+                : reqState === "error" ? "Error"
+                : reqState === "done" ? "✓ Requested"
+                : "⬇ Request"}
+            </button>
+          )}
           <SeenBtn watched={isFullyWatched} partial={!!isPartial} state={state} onMark={markSeason} onUnmark={unmarkSeason} />
           <span style={{ color: "var(--muted)", fontSize: 14, userSelect: "none" }}>
             {expanded ? "▲" : "▼"}
