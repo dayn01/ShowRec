@@ -35,7 +35,7 @@ def get_ai_recommendations(
 
     candidates_summary = "\n".join(
         f"- ID:{c['id']} | {c.get('title') or c.get('name')} ({c.get('media_type')}, {(c.get('release_date') or c.get('first_air_date') or '')[:4]}) score:{round(c.get('vote_average',0)*10)}% | {(c.get('overview',''))[:120]}"
-        for c in tmdb_candidates[:40]
+        for c in tmdb_candidates[:100]
     )
 
     prompt = f"""You are a TV and film recommendation expert. Analyse the user's taste and suggest the best picks.
