@@ -6,6 +6,12 @@ from config import settings
 from deps import get_profile_id, pkey
 import database
 import asyncio
+import datetime
+
+# Recency preference: how many years over which "new → old" is normalised, and
+# the max score swing at the slider extremes.
+_RECENCY_SPAN = 40
+_RECENCY_STRENGTH = 0.6
 
 router = APIRouter(prefix="/recommendations", tags=["recommendations"])
 
@@ -26,30 +32,29 @@ def _apply_rec_settings(recs: list[dict], settings: dict) -> list[dict]:
     Re-rank a profile's cached recommendations using its tuning:
       - genre_weight: scales the learned genre-affinity component (default 1.0)
       - genre_multipliers: {genre name -> factor}; 0 hides the genre entirely
-      - min_year / max_year: keep only titles released in that range (0 = no limit)
+      - recency: soft era preference in [-1, 1]; >0 favours newer titles, <0 older.
+        Nothing is removed — it just nudges the ranking.
     Defaults reproduce the stored ranking exactly (no-op).
     """
     genre_weight = settings.get("genre_weight", 1.0)
     multipliers = settings.get("genre_multipliers") or {}
-    min_year = settings.get("min_year") or 0
-    max_year = settings.get("max_year") or 0
-    if genre_weight == 1.0 and not multipliers and not min_year and not max_year:
+    recency = settings.get("recency") or 0.0
+    if genre_weight == 1.0 and not multipliers and not recency:
         return recs
 
+    this_year = datetime.date.today().year
     out: list[dict] = []
     for item in recs:
-        # Year filter (titles with no known date are kept, not dropped).
-        if min_year or max_year:
-            date = item.get("release_date") or item.get("first_air_date") or ""
-            yr = int(date[:4]) if date[:4].isdigit() else None
-            if yr is not None:
-                if min_year and yr < min_year:
-                    continue
-                if max_year and yr > max_year:
-                    continue
-
         base = item.get("base_score", item.get("score", 0) or 0)
         score = base + genre_weight * item.get("genre_component", 0)
+
+        # Soft recency nudge: r = +1 (brand new) … -1 (>= span years old).
+        if recency:
+            date = item.get("release_date") or item.get("first_air_date") or ""
+            if date[:4].isdigit():
+                age = min(max(this_year - int(date[:4]), 0), _RECENCY_SPAN)
+                r = 1 - 2 * age / _RECENCY_SPAN
+                score *= 1 + recency * _RECENCY_STRENGTH * r
 
         factor, excluded = 1.0, False
         for gid in item.get("genre_ids", []):

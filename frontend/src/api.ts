@@ -45,8 +45,7 @@ export interface Profile {
 export interface RecSettings {
   genre_weight: number;
   genre_multipliers: Record<string, number>;
-  min_year?: number;   // 0 = no limit
-  max_year?: number;   // 0 = no limit
+  recency?: number;   // -1 older … 0 neutral … +1 newer
 }
 
 export interface SetupStatus {
