@@ -224,7 +224,11 @@ export default function DetailModal({ tmdbId, mediaType, onClose }: Props) {
         <button
           onClick={onClose}
           style={{
-            position: "absolute", top: 14, right: 14, zIndex: 10,
+            position: "absolute",
+            // Clear the iOS notch when the modal is full-screen on mobile.
+            top: "calc(14px + env(safe-area-inset-top, 0px))",
+            right: "calc(14px + env(safe-area-inset-right, 0px))",
+            zIndex: 10,
             background: "rgba(0,0,0,0.6)", border: "none", color: "#fff",
             width: 32, height: 32, borderRadius: "50%", cursor: "pointer",
             fontSize: 18, lineHeight: "32px", textAlign: "center",

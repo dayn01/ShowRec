@@ -58,9 +58,10 @@ export default function HiddenTitles({ onClose }: { onClose: () => void }) {
           display: "flex", flexDirection: "column", overflow: "hidden",
         }}
       >
-        {/* Header */}
+        {/* Header — top/side padding clears the iOS notch when full-screen on mobile */}
         <div style={{
-          padding: "18px 22px", borderBottom: "1px solid var(--border)",
+          padding: "calc(18px + env(safe-area-inset-top, 0px)) calc(22px + env(safe-area-inset-right, 0px)) 18px 22px",
+          borderBottom: "1px solid var(--border)",
           display: "flex", alignItems: "center", justifyContent: "space-between",
         }}>
           <div>
