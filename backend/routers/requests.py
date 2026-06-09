@@ -44,3 +44,13 @@ async def request_statuses():
     if not overseerr.is_configured():
         return {"enabled": False, "statuses": {}}
     return {"enabled": True, "statuses": await overseerr.get_all_statuses()}
+
+
+@router.post("/check-ready")
+async def check_ready_now():
+    """Run the 'request became available' check now (also runs every 30 min).
+    First call just records a baseline; later calls notify on transitions to available."""
+    _require_configured()
+    import scheduler
+    await scheduler.check_requests_ready()
+    return {"status": "checked"}

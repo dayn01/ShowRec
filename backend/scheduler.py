@@ -3,11 +3,45 @@ APScheduler jobs:
   - Daily: check Trakt calendar for upcoming episodes, notify via Home Assistant
 """
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from integrations import trakt, homeassistant
+from integrations import trakt, homeassistant, overseerr
+from config import settings
 import logging
 
 logger = logging.getLogger(__name__)
 scheduler = AsyncIOScheduler()
+
+
+async def check_requests_ready():
+    """Notify (via Home Assistant) when an Overseerr request flips to 'available'."""
+    import database
+    if not overseerr.is_configured() or not (settings.ha_url and settings.ha_token):
+        return
+
+    current = await overseerr.get_all_statuses()      # {tmdb_id: status}
+    if not current:
+        return
+    current_s = {str(k): v for k, v in current.items()}
+
+    prev = await database.cache_get("request_state", "request_state") or {}
+    # First run (no baseline) just records state — don't blast a notification for
+    # everything already on the server.
+    if prev:
+        newly = [int(tid) for tid, status in current_s.items()
+                 if status == "available" and prev.get(tid) and prev.get(tid) != "available"]
+        if newly:
+            shows = await database.get_shows_bulk(newly)
+            lines = [
+                (shows.get(tid) or {}).get("title") or (shows.get(tid) or {}).get("name") or f"TMDB #{tid}"
+                for tid in newly[:10]
+            ]
+            count = len(newly)
+            await homeassistant.send_notification(
+                title=f"🎉 {count} request{'s' if count != 1 else ''} ready to watch",
+                message="\n".join(lines),
+            )
+            logger.info(f"Notified: {count} request(s) now available")
+
+    await database.cache_set("request_state", current_s)
 
 
 async def check_upcoming_episodes():
@@ -56,8 +90,9 @@ def start():
     scheduler.add_job(check_upcoming_episodes, "cron", hour=8, minute=0, id="daily_episodes")
     scheduler.add_job(_full_refresh, "interval", hours=6, id="full_refresh")
     scheduler.add_job(_light_sync, "interval", hours=1, id="light_sync")
+    scheduler.add_job(check_requests_ready, "interval", minutes=30, id="requests_ready")
     scheduler.start()
-    logger.info("Scheduler started — episode check 08:00, light sync hourly, full refresh every 6h")
+    logger.info("Scheduler started — episode check 08:00, light sync hourly, full refresh 6h, request-ready 30m")
 
 
 def _full_refresh():
@@ -70,5 +105,3 @@ def _light_sync():
     import asyncio
     import prefetch
     asyncio.run(prefetch.sync_all_watch_states())
-
-    log.info(f"Show DB refresh complete — updated {len(tv_ids)} shows")

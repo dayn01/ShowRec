@@ -24,6 +24,7 @@ TTL = {
     "similar":         86400,       # 24h (TasteDive + TMDB resolution)
     "providers":       86400,       # 24h (watch/where-to-watch by region)
     "owned":           3600,        # 1h  (Jellyfin/Plex library contents)
+    "request_state":   604800,      # 7d  (Overseerr status baseline for ready-alerts)
 }
 
 
