@@ -99,6 +99,32 @@ async def get_all_statuses() -> dict[int, str]:
     return result
 
 
+async def cancel_request(tmdb_id: int, media_type: str) -> dict:
+    """
+    Cancel the Overseerr request(s) for a title. Looks up the request ids from the
+    media detail (mediaInfo.requests) and DELETEs each. Returns
+    {"ok": bool, "cancelled": int, "status": str}.
+    """
+    kind = "movie" if media_type == "movie" else "tv"
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.get(f"{_base()}/api/v1/{kind}/{tmdb_id}", headers=_headers())
+            if r.status_code != 200:
+                return {"ok": False, "status": "error", "detail": f"lookup {r.status_code}"}
+            info = (r.json() or {}).get("mediaInfo") or {}
+            req_ids = [req.get("id") for req in (info.get("requests") or []) if req.get("id")]
+            if not req_ids:
+                return {"ok": True, "cancelled": 0, "status": "no_request"}
+            cancelled = 0
+            for rid in req_ids:
+                dr = await client.delete(f"{_base()}/api/v1/request/{rid}", headers=_headers())
+                if dr.status_code in (200, 204):
+                    cancelled += 1
+            return {"ok": cancelled > 0, "cancelled": cancelled, "status": "cancelled"}
+    except Exception as e:
+        return {"ok": False, "status": "error", "detail": str(e)}
+
+
 async def request_media(tmdb_id: int, media_type: str, seasons: list[int] | None = None) -> dict:
     """
     File a request with Overseerr. For TV, request `seasons` (the unseen ones the

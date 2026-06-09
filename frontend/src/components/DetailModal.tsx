@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, DetailedMedia, Recommendation } from "../api";
 
 // Let a vertical mouse wheel scroll a horizontal row. Uses a non-passive native
@@ -145,8 +145,22 @@ export default function DetailModal({ tmdbId, mediaType, onClose }: Props) {
 
   // Local override so the button reflects a just-sent request immediately,
   // before the status query refetches.
-  const [reqState, setReqState] = useState<"idle" | "sending" | "done" | "error">("idle");
+  const queryClient = useQueryClient();
+  const [reqState, setReqState] = useState<"idle" | "sending" | "done" | "error" | "canceling">("idle");
   useEffect(() => { setReqState("idle"); }, [current.tmdbId]);
+
+  async function cancelRequest() {
+    if (!data || reqState === "canceling") return;
+    setReqState("canceling");
+    try {
+      await api.cancelRequest(data.id, data.media_type);
+      setReqState("idle");
+      queryClient.invalidateQueries({ queryKey: ["request-status", current.mediaType, current.tmdbId] });
+    } catch {
+      setReqState("error");
+      setTimeout(() => setReqState("idle"), 3000);
+    }
+  }
 
   async function requestMedia() {
     if (!data || reqState === "sending") return;
@@ -352,26 +366,51 @@ export default function DetailModal({ tmdbId, mediaType, onClose }: Props) {
                   {/* Request via Overseerr — only rendered when Overseerr is configured. */}
                   {reqStatus?.enabled && (() => {
                     const onServer = reqStatus.status === "available";
-                    const alreadyRequested = reqState === "done" || (reqState === "idle" && reqStatus.requested);
-                    const disabled = onServer || alreadyRequested || reqState === "sending";
+                    const partial = reqStatus.status === "partial";
+                    // A request you can still cancel: pending/processing, or one just sent this session.
+                    const cancelable = reqState === "done" || reqState === "canceling"
+                      || (reqState === "idle" && (reqStatus.status === "pending" || reqStatus.status === "processing"));
+
+                    if (cancelable) {
+                      const busy = reqState === "canceling";
+                      return (
+                        <button
+                          onClick={cancelRequest}
+                          disabled={busy}
+                          title="Cancel this Overseerr request"
+                          style={{
+                            padding: "8px 16px", borderRadius: 20,
+                            border: "1px solid var(--border)", fontWeight: 600, fontSize: 13,
+                            cursor: busy ? "wait" : "pointer",
+                            background: "var(--surface2)", color: "var(--text)", transition: "background 0.2s",
+                          }}
+                        >
+                          {busy ? "Canceling…" : "✕ Cancel Request"}
+                        </button>
+                      );
+                    }
+
+                    const disabled = onServer || reqState === "sending";
                     const label =
                       reqState === "sending" ? "Requesting…"
                       : reqState === "error" ? "Error — try again"
                       : onServer ? "✓ On Server"
-                      : alreadyRequested ? "✓ Requested"
+                      : partial ? "◐ Request Remaining"
                       : "⬇ Request";
                     return (
                       <button
                         onClick={requestMedia}
                         disabled={disabled}
-                        title={onServer ? "Already available on your server" : "Request this via Overseerr"}
+                        title={onServer ? "Already available on your server"
+                          : partial ? "Some of this is on your server — request the rest"
+                          : "Request this via Overseerr"}
                         style={{
                           padding: "8px 16px", borderRadius: 20,
                           border: "1px solid var(--border)", fontWeight: 600, fontSize: 13,
                           cursor: disabled ? "default" : "pointer",
                           background: reqState === "error" ? "var(--red)"
-                            : onServer || alreadyRequested ? "var(--green)" : "var(--surface2)",
-                          color: onServer || alreadyRequested ? "#000" : "var(--text)",
+                            : onServer ? "var(--green)" : "var(--surface2)",
+                          color: onServer ? "#000" : "var(--text)",
                           transition: "background 0.2s",
                         }}
                       >

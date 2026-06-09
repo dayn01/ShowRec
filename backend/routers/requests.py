@@ -29,6 +29,15 @@ async def create_request(body: RequestBody):
     return result
 
 
+@router.delete("")
+async def cancel_request(body: RequestBody):
+    _require_configured()
+    result = await overseerr.cancel_request(body.tmdb_id, body.media_type)
+    if not result["ok"]:
+        raise HTTPException(status_code=502, detail=result.get("detail") or "Overseerr cancel failed")
+    return result
+
+
 @router.get("/status/{media_type}/{tmdb_id}")
 async def request_status(media_type: str, tmdb_id: int):
     if not overseerr.is_configured():

@@ -194,6 +194,12 @@ export const api = {
       headers: { "Content-Type": "application/json", "X-Profile-Id": String(getProfileId()) },
       body: JSON.stringify({ tmdb_id: tmdbId, media_type: mediaType, seasons }),
     }).then(r => { if (!r.ok) throw new Error(r.statusText); return r.json() as Promise<{ ok: boolean; status: string }>; }),
+  cancelRequest: (tmdbId: number, mediaType: string) =>
+    fetch(`/api/request`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json", "X-Profile-Id": String(getProfileId()) },
+      body: JSON.stringify({ tmdb_id: tmdbId, media_type: mediaType }),
+    }).then(r => { if (!r.ok) throw new Error(r.statusText); return r.json() as Promise<{ ok: boolean; cancelled: number; status: string }>; }),
   markWatched: (tmdbId: number, mediaType: string, title: string, year?: number) =>
     fetch(`/api/watched`, {
       method: "POST",
