@@ -177,6 +177,38 @@ def get_watched_movies(token: Optional[str] = None) -> list[dict]:
     return result
 
 
+def get_library_index() -> list[dict]:
+    """Every movie + show in the library mapped to its TMDB id, ratingKey and the
+    server's machine id (for play deep-links): [{tmdb_id, media_type, rating_key, machine}]."""
+    server = _get_server()
+    if not server:
+        return []
+    try:
+        machine = server.machineIdentifier
+    except Exception:
+        machine = None
+
+    out: list[dict] = []
+    for section in server.library.sections():
+        if section.type not in ("movie", "show"):
+            continue
+        mt = "movie" if section.type == "movie" else "tv"
+        try:
+            items = section.all()
+        except Exception:
+            continue
+        for it in items:
+            try:
+                tmdb_id = _tmdb_from_guids(it)
+                rk = getattr(it, "ratingKey", None)
+                if tmdb_id and rk:
+                    out.append({"tmdb_id": tmdb_id, "media_type": mt,
+                                "rating_key": str(rk), "machine": machine})
+            except Exception:
+                continue
+    return out
+
+
 def ping() -> bool:
     try:
         server = _get_server()

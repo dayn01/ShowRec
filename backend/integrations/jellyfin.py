@@ -119,6 +119,33 @@ async def get_watched_movies(user_id: str | None = None) -> list[dict]:
     return result
 
 
+async def get_library_index() -> list[dict]:
+    """Every movie + series in the library mapped to its TMDB id and Jellyfin item
+    id (for play deep-links): [{tmdb_id, media_type, item_id}, ...]."""
+    if not settings.jellyfin_url or not settings.jellyfin_api_key:
+        return []
+    user_id = settings.jellyfin_user_id
+    base = f"{_base()}/Users/{user_id}/Items" if user_id else f"{_base()}/Items"
+    out: list[dict] = []
+    async with httpx.AsyncClient(timeout=30) as client:
+        for item_type, mt in (("Movie", "movie"), ("Series", "tv")):
+            try:
+                r = await client.get(base, headers=_headers(), params={
+                    "IncludeItemTypes": item_type, "Recursive": "true",
+                    "Fields": "ProviderIds", "Limit": 10000,
+                })
+                if r.status_code != 200:
+                    continue
+                for it in r.json().get("Items", []):
+                    pid = it.get("ProviderIds", {})
+                    tmdb = pid.get("Tmdb") or pid.get("tmdb")
+                    if tmdb and it.get("Id"):
+                        out.append({"tmdb_id": int(tmdb), "media_type": mt, "item_id": it["Id"]})
+            except Exception:
+                continue
+    return out
+
+
 async def get_resume_items() -> list[dict]:
     user_id = settings.jellyfin_user_id
     async with httpx.AsyncClient() as client:

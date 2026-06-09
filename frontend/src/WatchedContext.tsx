@@ -40,6 +40,10 @@ interface WatchedContextType {
   // Watchlist
   isWatchlisted: (tmdbId: number) => boolean;
   toggleWatchlist: (item: any) => void;
+
+  // In the connected Jellyfin/Plex library
+  isOwned: (tmdbId: number) => boolean;
+  ownedLink: (tmdbId: number) => { source: string; url: string | null } | null;
 }
 
 const WatchedContext = createContext<WatchedContextType>({
@@ -51,6 +55,7 @@ const WatchedContext = createContext<WatchedContextType>({
   isEpisodeWatched: () => false, markEpisodeWatched: () => {}, markEpisodeUnwatched: () => {},
   isDismissed: () => false, dismiss: () => {}, undismiss: () => {},
   isWatchlisted: () => false, toggleWatchlist: () => {},
+  isOwned: () => false, ownedLink: () => null,
 });
 
 function loadSet(key: string): Set<string> {
@@ -82,6 +87,7 @@ export function WatchedProvider({ children }: { children: ReactNode }) {
   const [progressMap, setProgressMap] = useState<Map<string, SeasonProgress>>(() => loadMap("wc_progress"));
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(() => loadSet("wc_dismissed"));
   const [watchlistIds, setWatchlistIds] = useState<Set<string>>(() => loadSet("wc_watchlist"));
+  const [ownedMap, setOwnedMap] = useState<Record<string, { source: string; url: string | null }>>({});
 
   useEffect(() => { saveSet("wc_shows", watchedShows); }, [watchedShows]);
   useEffect(() => { saveSet("wc_episodes", watchedEpisodes); }, [watchedEpisodes]);
@@ -103,6 +109,11 @@ export function WatchedProvider({ children }: { children: ReactNode }) {
       .then(data => {
         setWatchlistIds(new Set((data?.tmdb_ids ?? []).map(String)));
       })
+      .catch(() => {});
+    // What's already in the Jellyfin/Plex library (for the "in library" badge + play link)
+    fetch("/api/library/owned", { headers: pidHeaders() })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (data?.items) setOwnedMap(data.items); })
       .catch(() => {});
   }, []);
 
@@ -349,6 +360,10 @@ export function WatchedProvider({ children }: { children: ReactNode }) {
     }
   }, [watchlistIds]);
 
+  // ── Owned (in Jellyfin/Plex library) ────────────────────────────────────────
+  const isOwned = useCallback((id: number) => Boolean(ownedMap[String(id)]), [ownedMap]);
+  const ownedLink = useCallback((id: number) => ownedMap[String(id)] ?? null, [ownedMap]);
+
   return (
     <WatchedContext.Provider value={{
       isWatched, markWatched, markUnwatched, markShowComplete, showProgress, partiallyWatchedIds,
@@ -357,6 +372,7 @@ export function WatchedProvider({ children }: { children: ReactNode }) {
       isEpisodeWatched, markEpisodeWatched, markEpisodeUnwatched,
       isDismissed, dismiss, undismiss,
       isWatchlisted, toggleWatchlist,
+      isOwned, ownedLink,
     }}>
       {children}
     </WatchedContext.Provider>

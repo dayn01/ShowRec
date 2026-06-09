@@ -1,7 +1,7 @@
 """TMDB search + watchlist."""
 from fastapi import APIRouter, Query, HTTPException, Depends
 from pydantic import BaseModel
-from integrations import tmdb
+from integrations import tmdb, jellyfin, plex
 from deps import get_profile_id, pkey
 from constants import GENRE_MAP
 from config import settings
@@ -141,6 +141,47 @@ async def search(q: str = Query(..., min_length=1), type: str = Query("multi", p
 
     results.sort(key=sort_key, reverse=True)
     return {"results": results}
+
+
+# ── Owned library (in Jellyfin / Plex) ────────────────────────────────────────
+
+@router.get("/library/owned")
+async def get_owned_library():
+    """Map of {tmdb_id: {source, url}} for titles in the connected Jellyfin/Plex
+    library, so the UI can badge "in your library" and offer a play deep-link.
+    Cached for an hour (library contents change slowly)."""
+    cached = await database.cache_get("owned_library", "owned")
+    if cached is not None:
+        return {"items": cached}
+
+    items: dict[str, dict] = {}
+
+    # Jellyfin (async)
+    try:
+        for e in await jellyfin.get_library_index():
+            url = f"{settings.jellyfin_url.rstrip('/')}/web/#/details?id={e['item_id']}"
+            items[str(e["tmdb_id"])] = {"source": "jellyfin", "url": url}
+    except Exception:
+        pass
+
+    # Plex (sync plexapi → threadpool); don't overwrite a Jellyfin entry.
+    if settings.plex_url and settings.plex_token:
+        try:
+            loop = asyncio.get_event_loop()
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                plex_items = await loop.run_in_executor(pool, plex.get_library_index)
+            for e in plex_items:
+                key = str(e["tmdb_id"])
+                if key in items:
+                    continue
+                url = (f"{settings.plex_url.rstrip('/')}/web/index.html#!/server/{e['machine']}"
+                       f"/details?key=%2Flibrary%2Fmetadata%2F{e['rating_key']}") if e.get("machine") else None
+                items[key] = {"source": "plex", "url": url}
+        except Exception:
+            pass
+
+    await database.cache_set("owned_library", items)
+    return {"items": items}
 
 
 # ── Watchlist ─────────────────────────────────────────────────────────────────

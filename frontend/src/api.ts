@@ -182,6 +182,8 @@ export const api = {
     get<{ enabled: boolean; results: Recommendation[] }>(`/details/${mediaType}/${tmdbId}/similar`),
   getWatchProviders: (mediaType: string, tmdbId: number, region: string) =>
     get<WatchProviders>(`/details/${mediaType}/${tmdbId}/watch-providers?region=${encodeURIComponent(region)}`),
+  getOwnedLibrary: () =>
+    get<{ items: Record<string, { source: string; url: string | null }> }>(`/library/owned`),
   getRequestStatus: (mediaType: string, tmdbId: number) =>
     get<RequestStatus>(`/request/status/${mediaType}/${tmdbId}`),
   getRequestStatuses: () =>

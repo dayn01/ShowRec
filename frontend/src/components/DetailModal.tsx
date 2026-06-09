@@ -138,7 +138,7 @@ export default function DetailModal({ tmdbId, mediaType, onClose }: Props) {
   }, []);
 
   const { isWatched, markWatched, markUnwatched, markShowComplete, initSeasonTotals,
-          isWatchlisted, toggleWatchlist, dismiss, showProgress, isSeasonWatched } = useWatched();
+          isWatchlisted, toggleWatchlist, dismiss, showProgress, isSeasonWatched, ownedLink } = useWatched();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
 
@@ -463,8 +463,8 @@ export default function DetailModal({ tmdbId, mediaType, onClose }: Props) {
               </div>
             )}
 
-            {/* Where to Watch — TMDB providers for the selected region */}
-            {providers && (
+            {/* Where to Watch — your library (Play) + TMDB providers for the region */}
+            {(providers || ownedLink(current.tmdbId)?.url) && (
               <div style={{ padding: "0 24px 24px" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
                   <h3 style={{ fontSize: 15, fontWeight: 600, color: "var(--accent2)" }}>Where to Watch</h3>
@@ -482,7 +482,7 @@ export default function DetailModal({ tmdbId, mediaType, onClose }: Props) {
                       <option key={code} value={code}>{label}</option>
                     ))}
                   </select>
-                  {providers.link && (
+                  {providers?.link && (
                     <a href={providers.link} target="_blank" rel="noreferrer"
                       style={{ marginLeft: "auto", fontSize: 12, color: "var(--muted)" }}>
                       More options ↗
@@ -490,24 +490,44 @@ export default function DetailModal({ tmdbId, mediaType, onClose }: Props) {
                   )}
                 </div>
 
-                {(providers.flatrate.length || providers.rent.length || providers.buy.length) ? (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                    {([["Stream", providers.flatrate], ["Rent", providers.rent], ["Buy", providers.buy]] as const)
-                      .filter(([, list]) => list.length > 0)
-                      .map(([label, list]) => (
-                        <div key={label} style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                          <span style={{ fontSize: 12, color: "var(--muted)", width: 48, flexShrink: 0 }}>{label}</span>
-                          {list.map(p => (
-                            <img key={p.name} src={p.logo_url || PLACEHOLDER} alt={p.name} title={p.name}
-                              style={{ width: 36, height: 36, borderRadius: 8, border: "1px solid var(--border)", objectFit: "cover" }} />
-                          ))}
-                        </div>
-                      ))}
-                  </div>
-                ) : (
-                  <div style={{ fontSize: 13, color: "var(--muted)" }}>
-                    Not available to stream, rent, or buy in {region}.
-                  </div>
+                {/* You already have it — jump straight to playing it */}
+                {ownedLink(current.tmdbId)?.url && (
+                  <a
+                    href={ownedLink(current.tmdbId)!.url!}
+                    target="_blank" rel="noreferrer"
+                    style={{
+                      display: "inline-flex", alignItems: "center", gap: 8,
+                      background: "var(--green)", color: "#000", fontWeight: 700, fontSize: 13,
+                      padding: "8px 16px", borderRadius: 20, marginBottom: 12,
+                    }}
+                  >
+                    ▶ Play in your library
+                    <span style={{ fontWeight: 500, opacity: 0.7, textTransform: "capitalize" }}>
+                      ({ownedLink(current.tmdbId)!.source})
+                    </span>
+                  </a>
+                )}
+
+                {providers && (
+                  (providers.flatrate.length || providers.rent.length || providers.buy.length) ? (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                      {([["Stream", providers.flatrate], ["Rent", providers.rent], ["Buy", providers.buy]] as const)
+                        .filter(([, list]) => list.length > 0)
+                        .map(([label, list]) => (
+                          <div key={label} style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                            <span style={{ fontSize: 12, color: "var(--muted)", width: 48, flexShrink: 0 }}>{label}</span>
+                            {list.map(p => (
+                              <img key={p.name} src={p.logo_url || PLACEHOLDER} alt={p.name} title={p.name}
+                                style={{ width: 36, height: 36, borderRadius: 8, border: "1px solid var(--border)", objectFit: "cover" }} />
+                            ))}
+                          </div>
+                        ))}
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: 13, color: "var(--muted)" }}>
+                      Not available to stream, rent, or buy in {region}.
+                    </div>
+                  )
                 )}
               </div>
             )}
