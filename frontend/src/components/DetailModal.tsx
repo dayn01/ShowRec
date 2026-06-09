@@ -334,7 +334,7 @@ export default function DetailModal({ tmdbId, mediaType, onClose }: Props) {
                       color: data && isLiked(data.id) ? "#fff" : "var(--muted)",
                     }}
                   >
-                    👍 Like
+                    {data && isLiked(data.id) ? "♥ Liked" : "♡ Like"}
                   </button>
 
                   <button
@@ -346,7 +346,7 @@ export default function DetailModal({ tmdbId, mediaType, onClose }: Props) {
                       background: "var(--surface2)", color: "var(--muted)",
                     }}
                   >
-                    👎 Not Interested
+                    ✕ Not Interested
                   </button>
 
                   {/* Request via Overseerr — only rendered when Overseerr is configured. */}

@@ -23,21 +23,13 @@ export default function MediaCard({ item, onClick, onMarkedSeen, fading, onSimil
   const score = Math.round(item.vote_average * 10);
   const scoreColor = score >= 75 ? "var(--green)" : score >= 55 ? "var(--yellow)" : "var(--red)";
 
-  const { isWatched, markWatched, markUnwatched, markShowComplete, showProgress, dismiss, undismiss,
-          isLiked, like, unlike, isWatchlisted, toggleWatchlist } = useWatched();
+  const { isWatched, markWatched, markUnwatched, markShowComplete, showProgress, dismiss, isWatchlisted, toggleWatchlist } = useWatched();
   const watched = isWatched(item.id);
   const onWatchlist = isWatchlisted(item.id);
-  const liked = isLiked(item.id);
 
-  function thumbDown(e: React.MouseEvent) {
+  function notInterested(e: React.MouseEvent) {
     e.stopPropagation();
-    dismiss(item.id, item.media_type, title);   // 👎 = not interested (hidden from recs)
-  }
-
-  function thumbUp(e: React.MouseEvent) {
-    e.stopPropagation();
-    if (liked) unlike(item.id, item.media_type);
-    else like(item.id, item.media_type, title);
+    dismiss(item.id, item.media_type, title);
   }
 
   function watchlistClick(e: React.MouseEvent) {
@@ -131,30 +123,19 @@ export default function MediaCard({ item, onClick, onMarkedSeen, fading, onSimil
         }}>
           {score > 0 ? `${score}%` : "N/A"}
         </div>
-        {/* Thumbs — under the score badge, appear on hover (👍 stays lit when liked) */}
-        <div className="dismiss-btn" style={{
-          position: "absolute", top: 38, right: 8, display: "flex", flexDirection: "column", gap: 6,
-          opacity: hovered || liked ? 1 : 0, transition: "opacity 0.15s",
-        }}>
-          <button
-            onClick={thumbUp}
-            title={liked ? "Liked — click to undo" : "I like this (more like it)"}
-            style={{
-              background: liked ? "var(--accent)" : "rgba(0,0,0,0.75)", border: "none", borderRadius: "50%",
-              width: 24, height: 24, cursor: "pointer", color: "#fff",
-              fontSize: 12, lineHeight: "24px", textAlign: "center", padding: 0,
-            }}
-          >👍</button>
-          <button
-            onClick={thumbDown}
-            title="Not interested — hide this"
-            style={{
-              background: "rgba(0,0,0,0.75)", border: "none", borderRadius: "50%",
-              width: 24, height: 24, cursor: "pointer", color: "#fff",
-              fontSize: 12, lineHeight: "24px", textAlign: "center", padding: 0,
-            }}
-          >👎</button>
-        </div>
+        {/* Not interested — under the score badge, appears on hover */}
+        <button
+          onClick={notInterested}
+          title="Not interested — hide this"
+          className="dismiss-btn"
+          style={{
+            position: "absolute", top: 38, right: 8,
+            background: "rgba(0,0,0,0.75)", border: "none", borderRadius: "50%",
+            width: 24, height: 24, cursor: "pointer", color: "#fff",
+            fontSize: 14, lineHeight: "24px", textAlign: "center", padding: 0,
+            opacity: hovered ? 1 : 0,
+          }}
+        >✕</button>
         <div style={{
           position: "absolute", top: 8, left: 8,
           background: "var(--accent)", borderRadius: 20,
