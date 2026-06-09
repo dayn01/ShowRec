@@ -12,17 +12,8 @@ from routers.recommendations import _gather_history
 from routers.details import _fetch_and_cache_show, _fetch_and_cache_season, _resolve_tastedive_item
 from constants import GENRE_MAP
 from config import settings
-import datetime
 
 logger = logging.getLogger(__name__)
-
-# Soft recency downweight for recommendations: titles older than the grace window
-# rank gradually lower (not removed), so the feed leans recent without dropping a
-# genuinely strong older pick — or a long-running show whose first-air date is old.
-RECENCY_GRACE_YEARS = 15
-RECENCY_PENALTY_PER_YEAR = 0.3
-RECENCY_PENALTY_CAP = 6.0
-
 
 async def _build_taste_profile(watched: list[dict]) -> dict:
     """
@@ -331,7 +322,6 @@ async def _build_recommendations(history: list[dict], profile_id: int = 1) -> di
     # Final weighted score. We split it into a genre-affinity component and the
     # rest ("base"), and persist both so the recommendations API can re-weight on
     # read from each profile's tuning (genre slider + per-genre multipliers).
-    current_year = datetime.date.today().year
     for item in scored.values():
         genre_component = item["_genre"]
         base = (
@@ -341,12 +331,8 @@ async def _build_recommendations(history: list[dict], profile_id: int = 1) -> di
             + item["_quality"] * 0.8     # overall quality
             + item["_trakt"]             # Trakt personal endorsement
         )
-        # Soft recency downweight (older titles rank lower; unknown dates untouched)
-        date = item.get("release_date") or item.get("first_air_date") or ""
-        if len(date) >= 4 and date[:4].isdigit():
-            age = current_year - int(date[:4])
-            if age > RECENCY_GRACE_YEARS:
-                base -= min((age - RECENCY_GRACE_YEARS) * RECENCY_PENALTY_PER_YEAR, RECENCY_PENALTY_CAP)
+        # Recency is handled on read by the profile's "Release era" preference, so
+        # the stored base stays era-neutral (Balanced = no recency effect).
         item["base_score"] = round(base, 2)
         item["genre_component"] = round(genre_component, 2)
         item["score"] = round(base + genre_component, 2)
