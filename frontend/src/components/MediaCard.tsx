@@ -20,8 +20,6 @@ export default function MediaCard({ item, onClick, onMarkedSeen, fading, onSimil
 }) {
   const title = item.title || item.name || "Unknown";
   const year = (item.release_date || item.first_air_date || "").slice(0, 4);
-  const score = Math.round(item.vote_average * 10);
-  const scoreColor = score >= 75 ? "var(--green)" : score >= 55 ? "var(--yellow)" : "var(--red)";
 
   const { isWatched, markWatched, markUnwatched, markShowComplete, showProgress, dismiss, isWatchlisted, toggleWatchlist } = useWatched();
   const watched = isWatched(item.id);
@@ -116,26 +114,23 @@ export default function MediaCard({ item, onClick, onMarkedSeen, fading, onSimil
           style={{ width: "100%", height: "100%", objectFit: "cover" }}
           onError={e => { (e.target as HTMLImageElement).src = PLACEHOLDER; }}
         />
-        <div style={{
-          position: "absolute", top: 8, right: 8,
-          background: "rgba(0,0,0,0.75)", borderRadius: 20,
-          padding: "2px 8px", fontSize: 12, fontWeight: 700, color: scoreColor,
-        }}>
-          {score > 0 ? `${score}%` : "N/A"}
-        </div>
-        {/* Not interested — under the score badge, appears on hover */}
+        {/* Not interested — top-right (where the score used to be), appears on hover */}
         <button
           onClick={notInterested}
           title="Not interested — hide this"
           className="dismiss-btn"
           style={{
-            position: "absolute", top: 38, right: 8,
+            position: "absolute", top: 8, right: 8,
             background: "rgba(0,0,0,0.75)", border: "none", borderRadius: "50%",
-            width: 24, height: 24, cursor: "pointer", color: "#fff",
-            fontSize: 14, lineHeight: "24px", textAlign: "center", padding: 0,
+            width: 26, height: 26, cursor: "pointer", color: "#fff",
+            display: "flex", alignItems: "center", justifyContent: "center", padding: 0,
             opacity: hovered ? 1 : 0,
           }}
-        >✕</button>
+        >
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor" aria-hidden="true">
+            <path d="M15 3H6c-.83 0-1.54.5-1.84 1.22l-3.02 7.05c-.09.23-.14.47-.14.73v2c0 1.1.9 2 2 2h6.31l-.95 4.57-.03.32c0 .41.17.79.44 1.06L9.83 23l6.59-6.59c.36-.36.58-.86.58-1.41V5c0-1.1-.9-2-2-2zm4 0v12h4V3h-4z"/>
+          </svg>
+        </button>
         <div style={{
           position: "absolute", top: 8, left: 8,
           background: "var(--accent)", borderRadius: 20,
