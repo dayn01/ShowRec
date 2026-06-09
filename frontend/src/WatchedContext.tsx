@@ -32,10 +32,13 @@ interface WatchedContextType {
   markEpisodeWatched: (tmdbId: number, season: number, episode: number, totalEpisodes?: number) => void;
   markEpisodeUnwatched: (tmdbId: number, season: number, episode: number) => void;
 
-  // "Not interested"
+  // Thumbs: 👎 = "not interested" (dismiss), 👍 = liked (positive taste signal)
   isDismissed: (tmdbId: number) => boolean;
   dismiss: (tmdbId: number, mediaType: string, title: string) => void;
   undismiss: (tmdbId: number, mediaType: string) => void;
+  isLiked: (tmdbId: number) => boolean;
+  like: (tmdbId: number, mediaType: string, title: string) => void;
+  unlike: (tmdbId: number, mediaType: string) => void;
 
   // Watchlist
   isWatchlisted: (tmdbId: number) => boolean;
@@ -54,6 +57,7 @@ const WatchedContext = createContext<WatchedContextType>({
   markSeasonWatched: () => {}, markSeasonUnwatched: () => {},
   isEpisodeWatched: () => false, markEpisodeWatched: () => {}, markEpisodeUnwatched: () => {},
   isDismissed: () => false, dismiss: () => {}, undismiss: () => {},
+  isLiked: () => false, like: () => {}, unlike: () => {},
   isWatchlisted: () => false, toggleWatchlist: () => {},
   isOwned: () => false, ownedLink: () => null,
 });
@@ -86,6 +90,7 @@ export function WatchedProvider({ children }: { children: ReactNode }) {
   const [watchedEpisodes, setWatchedEpisodes] = useState<Set<string>>(() => loadSet("wc_episodes"));
   const [progressMap, setProgressMap] = useState<Map<string, SeasonProgress>>(() => loadMap("wc_progress"));
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(() => loadSet("wc_dismissed"));
+  const [likedIds, setLikedIds] = useState<Set<string>>(() => loadSet("wc_liked"));
   const [watchlistIds, setWatchlistIds] = useState<Set<string>>(() => loadSet("wc_watchlist"));
   const [ownedMap, setOwnedMap] = useState<Record<string, { source: string; url: string | null }>>({});
 
@@ -93,6 +98,7 @@ export function WatchedProvider({ children }: { children: ReactNode }) {
   useEffect(() => { saveSet("wc_episodes", watchedEpisodes); }, [watchedEpisodes]);
   useEffect(() => { saveMap("wc_progress", progressMap); }, [progressMap]);
   useEffect(() => { saveSet("wc_dismissed", dismissedIds); }, [dismissedIds]);
+  useEffect(() => { saveSet("wc_liked", likedIds); }, [likedIds]);
   useEffect(() => { saveSet("wc_watchlist", watchlistIds); }, [watchlistIds]);
 
   // Load dismissals + watchlist from backend
@@ -103,6 +109,10 @@ export function WatchedProvider({ children }: { children: ReactNode }) {
         // Replace (not merge) so a re-synced account doesn't keep old dismissals.
         if (data) setDismissedIds(new Set((data.tmdb_ids ?? []).map(String)));
       })
+      .catch(() => {});
+    fetch("/api/watched/liked", { headers: pidHeaders() })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (data) setLikedIds(new Set((data.tmdb_ids ?? []).map(String))); })
       .catch(() => {});
     fetch("/api/watchlist/ids", { headers: pidHeaders() })
       .then(r => r.ok ? r.json() : null)
@@ -320,6 +330,7 @@ export function WatchedProvider({ children }: { children: ReactNode }) {
 
   const dismiss = useCallback((id: number, mediaType: string, title: string) => {
     setDismissedIds(p => new Set([...p, String(id)]));
+    setLikedIds(p => { const s = new Set(p); s.delete(String(id)); return s; });  // 👎 clears 👍
     fetch("/api/watched/dismiss", {
       method: "POST", headers: pidHeaders(),
       body: JSON.stringify({ tmdb_id: id, media_type: mediaType, title }),
@@ -329,6 +340,26 @@ export function WatchedProvider({ children }: { children: ReactNode }) {
   const undismiss = useCallback((id: number, mediaType: string) => {
     setDismissedIds(p => { const s = new Set(p); s.delete(String(id)); return s; });
     fetch("/api/watched/dismiss", {
+      method: "DELETE", headers: pidHeaders(),
+      body: JSON.stringify({ tmdb_id: id, media_type: mediaType }),
+    }).catch(() => {});
+  }, []);
+
+  // ── Liked (👍) ───────────────────────────────────────────────────────────────
+  const isLiked = useCallback((id: number) => likedIds.has(String(id)), [likedIds]);
+
+  const like = useCallback((id: number, mediaType: string, title: string) => {
+    setLikedIds(p => new Set([...p, String(id)]));
+    setDismissedIds(p => { const s = new Set(p); s.delete(String(id)); return s; });  // 👍 clears 👎
+    fetch("/api/watched/like", {
+      method: "POST", headers: pidHeaders(),
+      body: JSON.stringify({ tmdb_id: id, media_type: mediaType, title }),
+    }).catch(() => {});
+  }, []);
+
+  const unlike = useCallback((id: number, mediaType: string) => {
+    setLikedIds(p => { const s = new Set(p); s.delete(String(id)); return s; });
+    fetch("/api/watched/like", {
       method: "DELETE", headers: pidHeaders(),
       body: JSON.stringify({ tmdb_id: id, media_type: mediaType }),
     }).catch(() => {});
@@ -371,6 +402,7 @@ export function WatchedProvider({ children }: { children: ReactNode }) {
       isSeasonWatched, seasonProgress, markSeasonWatched, markSeasonUnwatched,
       isEpisodeWatched, markEpisodeWatched, markEpisodeUnwatched,
       isDismissed, dismiss, undismiss,
+      isLiked, like, unlike,
       isWatchlisted, toggleWatchlist,
       isOwned, ownedLink,
     }}>

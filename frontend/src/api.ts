@@ -222,6 +222,20 @@ export const api = {
   getDismissed: () => get<{ tmdb_ids: number[] }>(`/watched/dismissed`),
   getDismissedList: () => get<{ items: { tmdb_id: number; media_type: string; title: string; poster_url: string | null }[] }>(`/watched/dismissed/list`),
 
+  like: (tmdbId: number, mediaType: string, title: string) =>
+    fetch(`/api/watched/like`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Profile-Id": String(getProfileId()) },
+      body: JSON.stringify({ tmdb_id: tmdbId, media_type: mediaType, title }),
+    }).then(r => { if (!r.ok) throw new Error(r.statusText); return r.json(); }),
+  unlike: (tmdbId: number, mediaType: string) =>
+    fetch(`/api/watched/like`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json", "X-Profile-Id": String(getProfileId()) },
+      body: JSON.stringify({ tmdb_id: tmdbId, media_type: mediaType }),
+    }).then(r => { if (!r.ok) throw new Error(r.statusText); return r.json(); }),
+  getLiked: () => get<{ tmdb_ids: number[] }>(`/watched/liked`),
+
   searchTitles: (query: string, type: "multi" | "tv" | "movie" = "multi") =>
     get<{ results: Recommendation[] }>(`/search?q=${encodeURIComponent(query)}&type=${type}`),
 

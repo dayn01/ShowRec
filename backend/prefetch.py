@@ -155,8 +155,12 @@ async def _build_recommendations(history: list[dict], profile_id: int = 1) -> di
     # picks (TMDB recs / TasteDive), so drop them from the history first.
     dismissed = set(await database.get_dismissed_ids(profile_id))
     history = [h for h in history if h.get("tmdb_id") not in dismissed]
+    # 👍 liked titles — a positive taste signal: weighted into the profile and used
+    # as extra "more like this" seeds. They stay eligible to appear in the feed.
+    liked = [l for l in await database.get_liked_for_recommendations(profile_id)
+             if l.get("tmdb_id") and l["tmdb_id"] not in dismissed]
     watched_ids = [(h["tmdb_id"], h["media_type"]) for h in history if h.get("tmdb_id")]
-    if not watched_ids:
+    if not watched_ids and not liked:
         return None
 
     seen_ids = {tid for tid, _ in watched_ids}
@@ -168,7 +172,7 @@ async def _build_recommendations(history: list[dict], profile_id: int = 1) -> di
     trakt_token = (profile.get("trakt_token") if profile else None) or (
         settings.trakt_access_token if profile_id == 1 else None)
 
-    taste = await _build_taste_profile(history)
+    taste = await _build_taste_profile(history + liked * 3)   # liked weigh 3x
     genre_affinity = taste["genres"]
     max_genre = max(genre_affinity.values()) if genre_affinity else 1
     top_keywords = [k for k, _ in taste["keywords"].most_common(8)]
@@ -184,10 +188,16 @@ async def _build_recommendations(history: list[dict], profile_id: int = 1) -> di
     def _sample(lst):
         return (lst[:12] + lst[12::3])[:20]
 
-    # (tmdb_id, media_type, rank_within_type) — rank used for recency weighting
+    liked_tv = [(l["tmdb_id"], l["media_type"]) for l in liked if l["media_type"] == "tv"]
+    liked_movie = [(l["tmdb_id"], l["media_type"]) for l in liked if l["media_type"] == "movie"]
+
+    # (tmdb_id, media_type, rank_within_type) — rank used for recency weighting.
+    # Liked titles seed at rank 0 (full weight), ahead of sampled watch history.
     sample = (
-        [(tid, mt, i) for i, (tid, mt) in enumerate(_sample(tv_watched))]
-        + [(tid, mt, i) for i, (tid, mt) in enumerate(_sample(movie_watched))]
+        [(tid, mt, 0) for tid, mt in liked_tv]
+        + [(tid, mt, i + 1) for i, (tid, mt) in enumerate(_sample(tv_watched))]
+        + [(tid, mt, 0) for tid, mt in liked_movie]
+        + [(tid, mt, i + 1) for i, (tid, mt) in enumerate(_sample(movie_watched))]
     )
 
     async def fetch_recs(tmdb_id, media_type, recency_rank):
@@ -300,7 +310,7 @@ async def _build_recommendations(history: list[dict], profile_id: int = 1) -> di
 
     # ── TasteDive: "people who like what you watch also like…" (if a key is set).
     #    A curated similarity signal that complements TMDB's own recommendations.
-    for item in await _tastedive_candidates(history):
+    for item in await _tastedive_candidates(liked + history):
         iid = item.get("id")
         if not iid or iid in seen_ids:
             continue

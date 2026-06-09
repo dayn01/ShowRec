@@ -249,6 +249,7 @@ class DismissItem(BaseModel):
 @router.post("/dismiss")
 async def dismiss(item: DismissItem, pid: int = Depends(get_profile_id)):
     await database.add_dismissed(pid, item.tmdb_id, item.media_type, item.title)
+    await database.remove_liked(pid, item.tmdb_id)   # 👎 and 👍 are mutually exclusive
     return {"status": "dismissed"}
 
 
@@ -256,6 +257,24 @@ async def dismiss(item: DismissItem, pid: int = Depends(get_profile_id)):
 async def undismiss(item: DismissItem, pid: int = Depends(get_profile_id)):
     await database.remove_dismissed(pid, item.tmdb_id)
     return {"status": "restored"}
+
+
+@router.post("/like")
+async def like(item: DismissItem, pid: int = Depends(get_profile_id)):
+    await database.add_liked(pid, item.tmdb_id, item.media_type, item.title)
+    await database.remove_dismissed(pid, item.tmdb_id)   # 👍 clears a 👎
+    return {"status": "liked"}
+
+
+@router.delete("/like")
+async def unlike(item: DismissItem, pid: int = Depends(get_profile_id)):
+    await database.remove_liked(pid, item.tmdb_id)
+    return {"status": "unliked"}
+
+
+@router.get("/liked")
+async def list_liked(pid: int = Depends(get_profile_id)):
+    return {"tmdb_ids": await database.get_liked_ids(pid)}
 
 
 @router.get("/dismissed")

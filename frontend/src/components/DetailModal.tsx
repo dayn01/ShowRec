@@ -138,7 +138,8 @@ export default function DetailModal({ tmdbId, mediaType, onClose }: Props) {
   }, []);
 
   const { isWatched, markWatched, markUnwatched, markShowComplete, initSeasonTotals,
-          isWatchlisted, toggleWatchlist, dismiss, showProgress, isSeasonWatched, ownedLink } = useWatched();
+          isWatchlisted, toggleWatchlist, dismiss, showProgress, isSeasonWatched, ownedLink,
+          isLiked, like, unlike } = useWatched();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
 
@@ -188,6 +189,12 @@ export default function DetailModal({ tmdbId, mediaType, onClose }: Props) {
     if (!data) return;
     dismiss(data.id, data.media_type, data.title);
     onClose();  // hide it and close the modal
+  }
+
+  function toggleLike() {
+    if (!data) return;
+    if (isLiked(data.id)) unlike(data.id, data.media_type);
+    else like(data.id, data.media_type, data.title);
   }
 
   const score = data ? Math.round(data.vote_average * 10) : 0;
@@ -318,6 +325,19 @@ export default function DetailModal({ tmdbId, mediaType, onClose }: Props) {
                   </button>
 
                   <button
+                    onClick={toggleLike}
+                    title={data && isLiked(data.id) ? "Liked — click to undo" : "I like this (more like it)"}
+                    style={{
+                      padding: "8px 16px", borderRadius: 20,
+                      border: "1px solid var(--border)", cursor: "pointer", fontWeight: 600, fontSize: 13,
+                      background: data && isLiked(data.id) ? "var(--accent)" : "var(--surface2)",
+                      color: data && isLiked(data.id) ? "#fff" : "var(--muted)",
+                    }}
+                  >
+                    👍 Like
+                  </button>
+
+                  <button
                     onClick={notInterested}
                     title="Not interested — hide this"
                     style={{
@@ -326,7 +346,7 @@ export default function DetailModal({ tmdbId, mediaType, onClose }: Props) {
                       background: "var(--surface2)", color: "var(--muted)",
                     }}
                   >
-                    ✕ Not Interested
+                    👎 Not Interested
                   </button>
 
                   {/* Request via Overseerr — only rendered when Overseerr is configured. */}

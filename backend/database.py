@@ -202,6 +202,15 @@ async def init():
                 added_at     INTEGER NOT NULL,
                 PRIMARY KEY (profile_id, tmdb_id, media_type)
             );
+            -- "Liked" (👍) — a positive taste signal that boosts similar recs.
+            CREATE TABLE IF NOT EXISTS liked (
+                profile_id INTEGER NOT NULL DEFAULT 1,
+                tmdb_id    INTEGER NOT NULL,
+                media_type TEXT NOT NULL,
+                title      TEXT,
+                liked_at   INTEGER NOT NULL,
+                PRIMARY KEY (profile_id, tmdb_id, media_type)
+            );
             CREATE INDEX IF NOT EXISTS idx_shows_cached   ON shows(cached_at);
             CREATE INDEX IF NOT EXISTS idx_seasons_cached ON seasons(cached_at);
         """)
@@ -295,7 +304,7 @@ async def upsert_default_profile(name: str = "Me", emoji: str = "🍿",
 
 async def delete_profile(profile_id: int):
     async with _conn() as db:
-        for t in ("watch_state", "dismissed", "watchlist"):
+        for t in ("watch_state", "dismissed", "watchlist", "liked"):
             await db.execute(f"DELETE FROM {t} WHERE profile_id=?", (profile_id,))
         await db.execute("DELETE FROM profiles WHERE id=?", (profile_id,))
         await db.commit()
@@ -350,6 +359,40 @@ async def get_dismissed_ids(profile_id: int) -> list[int]:
     async with _conn() as db:
         async with db.execute("SELECT tmdb_id FROM dismissed WHERE profile_id=?", (profile_id,)) as cur:
             return [r[0] for r in await cur.fetchall()]
+
+
+# ── Liked (👍 positive taste signal) ──────────────────────────────────────────
+
+async def add_liked(profile_id: int, tmdb_id: int, media_type: str, title: str = ""):
+    async with _conn() as db:
+        await db.execute(
+            "INSERT OR REPLACE INTO liked (profile_id, tmdb_id, media_type, title, liked_at) VALUES (?,?,?,?,?)",
+            (profile_id, tmdb_id, "tv" if media_type == "tv" else "movie", title, int(time.time()))
+        )
+        await db.commit()
+
+
+async def remove_liked(profile_id: int, tmdb_id: int):
+    async with _conn() as db:
+        await db.execute("DELETE FROM liked WHERE profile_id=? AND tmdb_id=?", (profile_id, tmdb_id))
+        await db.commit()
+
+
+async def get_liked_ids(profile_id: int) -> list[int]:
+    async with _conn() as db:
+        async with db.execute("SELECT tmdb_id FROM liked WHERE profile_id=?", (profile_id,)) as cur:
+            return [r[0] for r in await cur.fetchall()]
+
+
+async def get_liked_for_recommendations(profile_id: int) -> list[dict]:
+    """Liked titles shaped like watch history, for taste-profiling + seeding."""
+    async with _conn() as db:
+        async with db.execute(
+            "SELECT tmdb_id, media_type, title FROM liked WHERE profile_id=?", (profile_id,)
+        ) as cur:
+            rows = await cur.fetchall()
+    return [{"tmdb_id": t, "media_type": mt, "title": title or "", "genres": []}
+            for t, mt, title in rows]
 
 
 # ── Watchlist ─────────────────────────────────────────────────────────────────
