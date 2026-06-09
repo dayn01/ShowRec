@@ -28,6 +28,13 @@ import { useWatched } from "../WatchedContext";
 
 const PLACEHOLDER = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='300'%3E%3Crect width='200' height='300' fill='%231a1a24'/%3E%3C/svg%3E";
 
+// Regions offered by the "Where to watch" selector (TMDB provider regions).
+const WATCH_REGIONS = [
+  ["AU", "Australia"], ["NZ", "New Zealand"], ["US", "United States"], ["GB", "United Kingdom"],
+  ["CA", "Canada"], ["IE", "Ireland"], ["IN", "India"], ["DE", "Germany"], ["FR", "France"],
+  ["ES", "Spain"], ["IT", "Italy"], ["NL", "Netherlands"], ["JP", "Japan"], ["BR", "Brazil"], ["MX", "Mexico"],
+] as const;
+
 function fmt(minutes?: number) {
   if (!minutes) return null;
   const h = Math.floor(minutes / 60);
@@ -72,6 +79,15 @@ export default function DetailModal({ tmdbId, mediaType, onClose }: Props) {
   });
   const similarItems = similar?.results ?? [];
   const showSimilarSection = similarLoading || similarItems.length > 0;
+
+  // Where to watch (region editable, remembered per device; default AU).
+  const [region, setRegion] = useState(() => localStorage.getItem("watchRegion") || "AU");
+  function changeRegion(r: string) { setRegion(r); localStorage.setItem("watchRegion", r); }
+  const { data: providers } = useQuery({
+    queryKey: ["providers", current.mediaType, current.tmdbId, region],
+    queryFn: () => api.getWatchProviders(current.mediaType, current.tmdbId, region),
+    staleTime: 1000 * 60 * 60 * 6,
+  });
 
   // Overseerr request status. Returns { enabled:false } when Overseerr isn't
   // configured, so the button stays hidden and the rest of the modal is unaffected.
@@ -444,6 +460,55 @@ export default function DetailModal({ tmdbId, mediaType, onClose }: Props) {
                     </div>
                   ))}
                 </div>
+              </div>
+            )}
+
+            {/* Where to Watch — TMDB providers for the selected region */}
+            {providers && (
+              <div style={{ padding: "0 24px 24px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
+                  <h3 style={{ fontSize: 15, fontWeight: 600, color: "var(--accent2)" }}>Where to Watch</h3>
+                  <select
+                    value={region}
+                    onChange={e => changeRegion(e.target.value)}
+                    title="Region"
+                    style={{
+                      background: "var(--surface2)", color: "var(--text)",
+                      border: "1px solid var(--border)", borderRadius: 8,
+                      padding: "3px 8px", fontSize: 12, cursor: "pointer",
+                    }}
+                  >
+                    {WATCH_REGIONS.map(([code, label]) => (
+                      <option key={code} value={code}>{label}</option>
+                    ))}
+                  </select>
+                  {providers.link && (
+                    <a href={providers.link} target="_blank" rel="noreferrer"
+                      style={{ marginLeft: "auto", fontSize: 12, color: "var(--muted)" }}>
+                      More options ↗
+                    </a>
+                  )}
+                </div>
+
+                {(providers.flatrate.length || providers.rent.length || providers.buy.length) ? (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    {([["Stream", providers.flatrate], ["Rent", providers.rent], ["Buy", providers.buy]] as const)
+                      .filter(([, list]) => list.length > 0)
+                      .map(([label, list]) => (
+                        <div key={label} style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                          <span style={{ fontSize: 12, color: "var(--muted)", width: 48, flexShrink: 0 }}>{label}</span>
+                          {list.map(p => (
+                            <img key={p.name} src={p.logo_url || PLACEHOLDER} alt={p.name} title={p.name}
+                              style={{ width: 36, height: 36, borderRadius: 8, border: "1px solid var(--border)", objectFit: "cover" }} />
+                          ))}
+                        </div>
+                      ))}
+                  </div>
+                ) : (
+                  <div style={{ fontSize: 13, color: "var(--muted)" }}>
+                    Not available to stream, rent, or buy in {region}.
+                  </div>
+                )}
               </div>
             )}
 

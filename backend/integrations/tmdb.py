@@ -61,6 +61,22 @@ async def get_details(tmdb_id: int, media_type: str) -> dict:
         return r.json()
 
 
+async def get_watch_providers(tmdb_id: int, media_type: str) -> dict:
+    """Streaming/rent/buy availability by region. Returns TMDB's `results` map
+    (region code -> {link, flatrate, rent, buy}). {} on error."""
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.get(
+                f"{BASE}/{media_type}/{tmdb_id}/watch/providers",
+                params=_params(),
+            )
+            if r.status_code != 200:
+                return {}
+            return r.json().get("results", {})
+    except Exception:
+        return {}
+
+
 async def get_tv_season(tmdb_id: int, season_number: int) -> dict:
     async with httpx.AsyncClient() as client:
         r = await client.get(

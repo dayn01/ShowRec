@@ -135,6 +135,16 @@ export interface DetailedMedia {
   cast?: { name: string; character: string; profile_url: string | null }[];
 }
 
+export interface WatchProvider { name: string; logo_url: string | null; }
+export interface WatchProviders {
+  region: string;
+  available_regions: string[];
+  link: string | null;
+  flatrate: WatchProvider[];
+  rent: WatchProvider[];
+  buy: WatchProvider[];
+}
+
 export const api = {
   getCustomRecommendations: (body: { media_type: string; genres: string[]; prompt: string }) =>
     fetch("/api/ai-recommendations/custom", {
@@ -170,6 +180,8 @@ export const api = {
     }).then(r => { if (!r.ok) throw new Error(r.statusText); return r.json() as Promise<{ shows: any[] }>; }),
   getSimilar: (mediaType: string, tmdbId: number) =>
     get<{ enabled: boolean; results: Recommendation[] }>(`/details/${mediaType}/${tmdbId}/similar`),
+  getWatchProviders: (mediaType: string, tmdbId: number, region: string) =>
+    get<WatchProviders>(`/details/${mediaType}/${tmdbId}/watch-providers?region=${encodeURIComponent(region)}`),
   getRequestStatus: (mediaType: string, tmdbId: number) =>
     get<RequestStatus>(`/request/status/${mediaType}/${tmdbId}`),
   getRequestStatuses: () =>

@@ -289,6 +289,45 @@ async def get_similar(media_type: str, tmdb_id: int, limit: int = 12):
     return {"enabled": True, "results": results}
 
 
+_PROVIDER_LOGO = "https://image.tmdb.org/t/p/w92"
+
+
+def _shape_providers(region_data: dict) -> dict:
+    """Shape one region's TMDB watch data into {link, flatrate, rent, buy} lists."""
+    def items(kind):
+        seen, out = set(), []
+        for p in region_data.get(kind, []) or []:
+            name = p.get("provider_name")
+            if name and name not in seen:
+                seen.add(name)
+                out.append({"name": name, "logo_url": _PROVIDER_LOGO + p["logo_path"] if p.get("logo_path") else None})
+        return out
+    return {
+        "link": region_data.get("link"),
+        "flatrate": items("flatrate"),   # streaming (subscription)
+        "rent": items("rent"),
+        "buy": items("buy"),
+    }
+
+
+@router.get("/{media_type}/{tmdb_id}/watch-providers")
+async def get_watch_providers(media_type: str, tmdb_id: int, region: str = "AU"):
+    """Where-to-watch for a title in a given region (default AU). One TMDB call
+    is cached for all regions, then sliced to the requested one."""
+    if media_type not in ("tv", "movie"):
+        raise HTTPException(400, "media_type must be 'tv' or 'movie'")
+    region = (region or "AU").upper()
+
+    cache_key = f"providers:{media_type}:{tmdb_id}"
+    all_regions = await database.cache_get(cache_key, "providers")
+    if all_regions is None:
+        all_regions = await tmdb.get_watch_providers(tmdb_id, media_type)
+        await database.cache_set(cache_key, all_regions)
+
+    region_data = all_regions.get(region) or {}
+    return {"region": region, "available_regions": sorted(all_regions.keys()), **_shape_providers(region_data)}
+
+
 @router.get("/tv/{tmdb_id}/season/{season_number}")
 async def get_season_episodes(tmdb_id: int, season_number: int):
     cached = await database.get_season(tmdb_id, season_number)

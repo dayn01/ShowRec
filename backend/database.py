@@ -22,6 +22,7 @@ TTL = {
     "ai_picks":        86400,       # 24h (expensive)
     "upcoming":        3600,        # 1h
     "similar":         86400,       # 24h (TasteDive + TMDB resolution)
+    "providers":       86400,       # 24h (watch/where-to-watch by region)
 }
 
 
