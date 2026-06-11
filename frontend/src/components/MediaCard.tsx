@@ -6,10 +6,10 @@ import { useIsMobile } from "../useIsMobile";
 
 // Jellyseerr/Overseerr availability → badge appearance. Absent status = no badge.
 const REQUEST_BADGES: Record<string, { label: string; bg: string; color: string }> = {
-  available:  { label: "✓ In Library", bg: "var(--green)",  color: "#000" },
-  partial:    { label: "◐ Partial",    bg: "var(--yellow)", color: "#000" },
-  processing: { label: "⬇ Downloading", bg: "var(--accent)", color: "#fff" },
-  pending:    { label: "⏳ Requested",  bg: "var(--accent)", color: "#fff" },
+  available:  { label: "✓ Available",   bg: "var(--green)",  color: "#000" },
+  partial:    { label: "◐ Partial",     bg: "var(--yellow)", color: "#000" },
+  processing: { label: "⏳ Downloading", bg: "var(--accent)", color: "#fff" },
+  pending:    { label: "⏳ Downloading", bg: "var(--accent)", color: "#fff" },
 };
 
 const PLACEHOLDER = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='300' viewBox='0 0 200 300'%3E%3Crect width='200' height='300' fill='%231a1a24'/%3E%3Ctext x='100' y='155' text-anchor='middle' fill='%234444aa' font-size='14' font-family='sans-serif'%3ENo Image%3C/text%3E%3C/svg%3E";
@@ -242,7 +242,7 @@ export default function MediaCard({ item, onClick, onMarkedSeen, fading, onSimil
             marginTop: "auto", alignSelf: "center",
             background: reqBadge.bg, borderRadius: 20,
             padding: "3px 12px", fontSize: 11, fontWeight: 700, color: reqBadge.color,
-          }}>{reqKey === "processing" ? "Downloading" : reqBadge.label}</div>
+          }}>{(reqKey === "processing" || reqKey === "pending") ? "Downloading" : reqBadge.label}</div>
         )}
       </div>
     </div>
