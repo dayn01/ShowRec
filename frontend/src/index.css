@@ -19,6 +19,8 @@ body {
   color: var(--text);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   min-height: 100vh;
+  touch-action: manipulation;          /* disable double-tap-to-zoom */
+  -webkit-text-size-adjust: 100%;      /* stop iOS auto-resizing text */
 }
 
 a { color: inherit; text-decoration: none; }

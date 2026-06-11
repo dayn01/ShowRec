@@ -45,9 +45,8 @@ export default function MediaCard({ item, onClick, onMarkedSeen, fading, onSimil
     queryFn: api.getRequestStatuses,
     staleTime: 1000 * 60 * 2,
   });
-  const reqBadge = reqStatuses?.enabled
-    ? REQUEST_BADGES[reqStatuses.statuses[item.id]]
-    : undefined;
+  const reqKey = reqStatuses?.enabled ? reqStatuses.statuses[item.id] : undefined;
+  const reqBadge = reqKey ? REQUEST_BADGES[reqKey] : undefined;
   // On mobile the poster corner is crowded → show the badge in the content area
   // (where the description blurb is hidden) instead.
   const isMobile = useIsMobile();
@@ -236,8 +235,9 @@ export default function MediaCard({ item, onClick, onMarkedSeen, fading, onSimil
             {item.overview || "No description available."}
           </div>
         )}
-        {/* Mobile: availability badge sits where the (hidden) blurb was, bottom-centered. */}
-        {isMobile && reqBadge && (
+        {/* Mobile: availability badge sits where the (hidden) blurb was, bottom-centered.
+            Skip the "Downloading" (processing) badge on mobile to reduce clutter. */}
+        {isMobile && reqBadge && reqKey !== "processing" && (
           <div style={{
             marginTop: "auto", alignSelf: "center",
             background: reqBadge.bg, borderRadius: 20,
