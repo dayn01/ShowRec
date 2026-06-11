@@ -90,6 +90,7 @@ export interface RequestStatus {
   enabled: boolean;
   status: string;   // unknown | pending | processing | partial | available
   requested: boolean;
+  seasons?: Record<string, string>;   // season_number → status (TV)
 }
 
 export interface DetailedMedia {

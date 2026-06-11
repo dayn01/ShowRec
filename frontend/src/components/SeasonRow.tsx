@@ -158,7 +158,17 @@ export default function SeasonRow({ season, tmdbId, showTitle, autoExpand = fals
     staleTime: 1000 * 60 * 2,
   });
   const requestEnabled = !!reqStatuses?.enabled;
+  // Per-show status (incl. per-season) — shares DetailModal's cache.
+  const { data: showReq } = useQuery({
+    queryKey: ["request-status", "tv", tmdbId],
+    queryFn: () => api.getRequestStatus("tv", tmdbId),
+    staleTime: 1000 * 60 * 5,
+    enabled: requestEnabled,
+  });
+  const seasonStatus = showReq?.seasons?.[String(season.season_number)];
+  const seasonRequested = ["pending", "processing", "partial", "available"].includes(seasonStatus || "");
   const [reqState, setReqState] = useState<"idle" | "sending" | "done" | "error">("idle");
+  const reqDone = reqState === "done" || seasonRequested;   // stays green once requested/on server
   const isMobile = useIsMobile();
 
   async function requestSeason(e: React.MouseEvent) {
@@ -292,22 +302,22 @@ export default function SeasonRow({ season, tmdbId, showTitle, autoExpand = fals
           {requestEnabled && (
             <button
               onClick={requestSeason}
-              disabled={reqState === "sending" || reqState === "done"}
-              title="Request this season via Overseerr/Jellyseerr"
+              disabled={reqState === "sending" || reqDone}
+              title={reqDone ? "Already requested / on your server" : "Request this season via Overseerr/Jellyseerr"}
               style={{
                 padding: isMobile ? "5px 9px" : "5px 12px",
                 borderRadius: 20, border: "1px solid var(--border)",
-                cursor: reqState === "sending" ? "wait" : reqState === "done" ? "default" : "pointer",
+                cursor: reqState === "sending" ? "wait" : reqDone ? "default" : "pointer",
                 fontWeight: 600, fontSize: 12, whiteSpace: "nowrap", flexShrink: 0,
                 background: reqState === "error" ? "var(--red)"
-                  : reqState === "done" ? "var(--green)" : "var(--surface2)",
-                color: reqState === "done" ? "#000" : "var(--text)",
+                  : reqDone ? "var(--green)" : "var(--surface2)",
+                color: reqDone ? "#000" : "var(--text)",
                 transition: "background 0.2s",
               }}
             >
               {isMobile
-                ? (reqState === "sending" ? "…" : reqState === "error" ? "✕" : reqState === "done" ? "✓" : "⬇")
-                : (reqState === "sending" ? "Requesting…" : reqState === "error" ? "Error" : reqState === "done" ? "✓ Requested" : "⬇ Request")}
+                ? (reqState === "sending" ? "…" : reqState === "error" ? "✕" : reqDone ? "✓" : "⬇")
+                : (reqState === "sending" ? "Requesting…" : reqState === "error" ? "Error" : reqDone ? "✓ Requested" : "⬇ Request")}
             </button>
           )}
           <SeenBtn watched={isFullyWatched} partial={!!isPartial} state={state} onMark={markSeason} onUnmark={unmarkSeason} />

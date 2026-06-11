@@ -54,15 +54,23 @@ async def get_status(tmdb_id: int, media_type: str) -> dict:
         async with httpx.AsyncClient(timeout=10) as client:
             r = await client.get(f"{_base()}/api/v1/{kind}/{tmdb_id}", headers=_headers())
             if r.status_code != 200:
-                return {"status": "unknown", "requested": False}
+                return {"status": "unknown", "requested": False, "seasons": {}}
             info = (r.json() or {}).get("mediaInfo") or {}
             code = info.get("status")
+            # Per-season availability (TV), so the per-season Request buttons can
+            # reflect the real state rather than only this session's clicks.
+            seasons = {}
+            for s in (info.get("seasons") or []):
+                sn = s.get("seasonNumber")
+                if sn is not None:
+                    seasons[str(sn)] = _STATUS.get(s.get("status"), "unknown")
             return {
                 "status": _STATUS.get(code, "unknown"),
                 "requested": code in (2, 3, 4, 5),
+                "seasons": seasons,
             }
     except Exception:
-        return {"status": "unknown", "requested": False}
+        return {"status": "unknown", "requested": False, "seasons": {}}
 
 
 async def get_all_statuses() -> dict[int, str]:
