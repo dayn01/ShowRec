@@ -6,6 +6,15 @@ import { useIsMobile } from "../useIsMobile";
 
 type WatchState = "idle" | "loading" | "error";
 
+// Per-season Overseerr state → button look. "none" = requestable.
+const SEASON_BTN: Record<string, { bg: string; color: string; label: string; mobile: string }> = {
+  none:       { bg: "var(--surface2)", color: "var(--text)", label: "⬇ Request",     mobile: "⬇" },
+  pending:    { bg: "var(--accent)",   color: "#fff",        label: "⏳ Downloading", mobile: "⏳" },
+  processing: { bg: "var(--accent)",   color: "#fff",        label: "⏳ Downloading", mobile: "⏳" },
+  partial:    { bg: "var(--yellow)",   color: "#000",        label: "◐ Partial",      mobile: "◐" },
+  available:  { bg: "var(--green)",    color: "#000",        label: "✓ Available",    mobile: "✓" },
+};
+
 function SeenBtn({ watched, partial, state, onMark, onUnmark, small }: {
   watched: boolean; partial?: boolean; state: WatchState;
   onMark: () => void; onUnmark: () => void; small?: boolean;
@@ -166,9 +175,12 @@ export default function SeasonRow({ season, tmdbId, showTitle, autoExpand = fals
     enabled: requestEnabled,
   });
   const seasonStatus = showReq?.seasons?.[String(season.season_number)];
-  const seasonRequested = ["pending", "processing", "partial", "available"].includes(seasonStatus || "");
   const [reqState, setReqState] = useState<"idle" | "sending" | "done" | "error">("idle");
-  const reqDone = reqState === "done" || seasonRequested;   // stays green once requested/on server
+  // Effective season state for the button: an in-flight/just-sent click reads as
+  // "processing"; otherwise the Overseerr per-season status (none = requestable).
+  const effStatus = reqState === "done" ? "processing"
+    : (seasonStatus && seasonStatus !== "unknown" ? seasonStatus : "none");
+  const seasonRequested = effStatus !== "none";   // anything but "none" disables re-request
   const isMobile = useIsMobile();
 
   async function requestSeason(e: React.MouseEvent) {
@@ -299,27 +311,35 @@ export default function SeasonRow({ season, tmdbId, showTitle, autoExpand = fals
           )}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-          {requestEnabled && (
-            <button
-              onClick={requestSeason}
-              disabled={reqState === "sending" || reqDone}
-              title={reqDone ? "Already requested / on your server" : "Request this season via Overseerr/Jellyseerr"}
-              style={{
-                padding: isMobile ? "5px 9px" : "5px 12px",
-                borderRadius: 20, border: "1px solid var(--border)",
-                cursor: reqState === "sending" ? "wait" : reqDone ? "default" : "pointer",
-                fontWeight: 600, fontSize: 12, whiteSpace: "nowrap", flexShrink: 0,
-                background: reqState === "error" ? "var(--red)"
-                  : reqDone ? "var(--green)" : "var(--surface2)",
-                color: reqDone ? "#000" : "var(--text)",
-                transition: "background 0.2s",
-              }}
-            >
-              {isMobile
-                ? (reqState === "sending" ? "…" : reqState === "error" ? "✕" : reqDone ? "✓" : "⬇")
-                : (reqState === "sending" ? "Requesting…" : reqState === "error" ? "Error" : reqDone ? "✓ Requested" : "⬇ Request")}
-            </button>
-          )}
+          {requestEnabled && (() => {
+            const cfg = SEASON_BTN[effStatus] ?? SEASON_BTN.none;
+            const sending = reqState === "sending";
+            const error = reqState === "error";
+            const title = effStatus === "available" ? "This season is on your server"
+              : effStatus === "partial" ? "Some episodes are available"
+              : effStatus !== "none" ? "Waiting on download"
+              : "Request this season via Overseerr/Jellyseerr";
+            return (
+              <button
+                onClick={requestSeason}
+                disabled={sending || seasonRequested}
+                title={title}
+                style={{
+                  padding: isMobile ? "5px 9px" : "5px 12px",
+                  borderRadius: 20, border: "1px solid var(--border)",
+                  cursor: sending ? "wait" : seasonRequested ? "default" : "pointer",
+                  fontWeight: 600, fontSize: 12, whiteSpace: "nowrap", flexShrink: 0,
+                  background: error ? "var(--red)" : cfg.bg,
+                  color: error ? "#fff" : cfg.color,
+                  transition: "background 0.2s",
+                }}
+              >
+                {isMobile
+                  ? (sending ? "…" : error ? "✕" : cfg.mobile)
+                  : (sending ? "Requesting…" : error ? "Error" : cfg.label)}
+              </button>
+            );
+          })()}
           <SeenBtn watched={isFullyWatched} partial={!!isPartial} state={state} onMark={markSeason} onUnmark={unmarkSeason} />
           <span style={{ color: "var(--muted)", fontSize: 14, userSelect: "none" }}>
             {expanded ? "▲" : "▼"}
