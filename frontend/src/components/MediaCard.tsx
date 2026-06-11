@@ -236,13 +236,13 @@ export default function MediaCard({ item, onClick, onMarkedSeen, fading, onSimil
           </div>
         )}
         {/* Mobile: availability badge sits where the (hidden) blurb was, bottom-centered.
-            Skip the "Downloading" (processing) badge on mobile to reduce clutter. */}
-        {isMobile && reqBadge && reqKey !== "processing" && (
+            Drop the ⬇ icon from the Downloading badge here (keep the text). */}
+        {isMobile && reqBadge && (
           <div style={{
             marginTop: "auto", alignSelf: "center",
             background: reqBadge.bg, borderRadius: 20,
             padding: "3px 12px", fontSize: 11, fontWeight: 700, color: reqBadge.color,
-          }}>{reqBadge.label}</div>
+          }}>{reqKey === "processing" ? "Downloading" : reqBadge.label}</div>
         )}
       </div>
     </div>
