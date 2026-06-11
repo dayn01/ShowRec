@@ -211,7 +211,14 @@ async def remove_from_watchlist(item: WatchlistItem, pid: int = Depends(get_prof
 
 @router.get("/watchlist")
 async def get_watchlist(pid: int = Depends(get_profile_id)):
-    return {"items": await database.get_watchlist(pid)}
+    items = await database.get_watchlist(pid)
+    # The watchlist table doesn't store genres — enrich from the show cache so the
+    # genre filter on the Watchlist page has something to work with.
+    cache = await database.get_shows_bulk([i["tmdb_id"] for i in items])
+    for it in items:
+        show = cache.get(it["tmdb_id"])
+        it["genre_ids"] = show.get("genre_ids", []) if show else []
+    return {"items": items}
 
 
 @router.get("/watchlist/ids")

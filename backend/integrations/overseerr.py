@@ -57,13 +57,28 @@ async def get_status(tmdb_id: int, media_type: str) -> dict:
                 return {"status": "unknown", "requested": False, "seasons": {}}
             info = (r.json() or {}).get("mediaInfo") or {}
             code = info.get("status")
-            # Per-season availability (TV), so the per-season Request buttons can
-            # reflect the real state rather than only this session's clicks.
-            seasons = {}
+            # Per-season status (TV), so the per-season Request buttons reflect the
+            # real state, not just this session's clicks. Merge two sources: the
+            # tracked seasons (availability) and the request objects (where a
+            # freshly-requested season shows up before it's on disk). Keep the most
+            # "available" status when they disagree.
+            _RANK = {"unknown": 0, "pending": 1, "processing": 2, "partial": 3, "available": 4}
+            seasons: dict[str, str] = {}
+
+            def _merge(season_number, status_code):
+                if season_number is None:
+                    return
+                key = str(season_number)
+                new = _STATUS.get(status_code, "unknown")
+                if _RANK.get(new, 0) >= _RANK.get(seasons.get(key, "unknown"), 0):
+                    seasons[key] = new
+
             for s in (info.get("seasons") or []):
-                sn = s.get("seasonNumber")
-                if sn is not None:
-                    seasons[str(sn)] = _STATUS.get(s.get("status"), "unknown")
+                _merge(s.get("seasonNumber"), s.get("status"))
+            for req in (info.get("requests") or []):
+                for rs in (req.get("seasons") or []):
+                    # A season inside a request is at least being processed.
+                    _merge(rs.get("seasonNumber"), rs.get("status") or 3)
             return {
                 "status": _STATUS.get(code, "unknown"),
                 "requested": code in (2, 3, 4, 5),
