@@ -25,6 +25,7 @@ TTL = {
     "providers":       86400,       # 24h (watch/where-to-watch by region)
     "owned":           3600,        # 1h  (Jellyfin/Plex library contents)
     "request_state":   604800,      # 7d  (Overseerr status baseline for ready-alerts)
+    "new_season_notify": 2592000,   # 30d (baseline of already-notified new seasons)
     "availability":    900,         # 15m (latest library episode per show)
 }
 
@@ -656,6 +657,174 @@ async def get_watch_state(profile_id: int) -> dict:
         "seasons": seasons,
         "episodes": episodes,
         "last_watched": last_watched,
+    }
+
+
+async def get_next_up(profile_id: int) -> dict[int, dict]:
+    """
+    For each show the profile is watching, the NEXT unwatched aired episode
+    (earliest by season, then episode number). Powers the Watching page's one-tap
+    "continue" — works for both binge-in-progress shows (next in line) and
+    caught-up shows where a new episode just aired. Computed from watch_state +
+    the seasons cache; shows whose every aired episode is watched are omitted.
+    {tmdb_id: {season, episode, name, air_date, still_url, runtime}}.
+    """
+    async with _conn() as db:
+        async with db.execute(
+            "SELECT tmdb_id, season_number, episode_number FROM watch_state "
+            "WHERE profile_id=? AND media_type='episode'", (profile_id,)
+        ) as cur:
+            ep_rows = await cur.fetchall()
+        async with db.execute(
+            "SELECT tmdb_id FROM watch_state WHERE profile_id=? AND media_type='show'",
+            (profile_id,)
+        ) as cur:
+            show_marked = {r[0] for r in await cur.fetchall()}
+
+        watched_by_show: dict[int, set] = {}
+        for tid, sn, ep in ep_rows:
+            watched_by_show.setdefault(tid, set()).add((sn, ep))
+
+        show_ids = set(watched_by_show) | show_marked
+        if not show_ids:
+            return {}
+        ids = list(show_ids)
+        qmarks = ",".join("?" * len(ids))
+        seasons_cache: dict[tuple[int, int], dict] = {}
+        async with db.execute(
+            f"SELECT tmdb_id, season_number, data FROM seasons WHERE tmdb_id IN ({qmarks})", ids
+        ) as cur:
+            for tid, sn, data in await cur.fetchall():
+                seasons_cache[(tid, sn)] = json.loads(data)
+
+    today = time.strftime("%Y-%m-%d")
+    by_show: dict[int, list[int]] = {}
+    for (tid, sn) in seasons_cache:
+        if sn >= 1:
+            by_show.setdefault(tid, []).append(sn)
+
+    out: dict[int, dict] = {}
+    for tid in show_ids:
+        watched = watched_by_show.get(tid, set())
+        found = None
+        for sn in sorted(by_show.get(tid, [])):
+            sdata = seasons_cache.get((tid, sn))
+            if not sdata:
+                continue
+            for e in sorted(sdata.get("episodes", []), key=lambda x: x.get("episode_number") or 0):
+                en = e.get("episode_number")
+                if en is None:
+                    continue
+                ad = e.get("air_date")
+                if ad and ad > today:       # not aired yet — stop scanning this run
+                    continue
+                if (sn, en) in watched:
+                    continue
+                found = {
+                    "season": sn, "episode": en,
+                    "name": e.get("name") or "",
+                    "air_date": ad,
+                    "still_url": e.get("still_url"),
+                    "runtime": e.get("runtime"),
+                }
+                break
+            if found:
+                break
+        if found:
+            out[tid] = found
+    return out
+
+
+async def get_viewing_stats(profile_id: int) -> dict:
+    """
+    Aggregate viewing stats for the Stats page, computed from watch_state + the
+    show/season caches. Note: synced rows carry the sync time (not the real watch
+    date), so we deliberately avoid a time-series here and report only accurate
+    totals. Runtimes come from the caches, with a per-show average fallback.
+    """
+    from collections import Counter
+    async with _conn() as db:
+        async with db.execute(
+            "SELECT media_type, tmdb_id, season_number, episode_number FROM watch_state WHERE profile_id=?",
+            (profile_id,)
+        ) as cur:
+            rows = await cur.fetchall()
+        async with db.execute(
+            "SELECT source, COUNT(*) FROM watch_state WHERE profile_id=? GROUP BY source", (profile_id,)
+        ) as cur:
+            sources = {(s or "unknown"): c for s, c in await cur.fetchall()}
+
+    movie_ids: set[int] = set()
+    show_ids: set[int] = set()
+    episodes_by_show: dict[int, int] = {}
+    watched_eps: dict[int, set] = {}
+    for mt, tid, sn, ep in rows:
+        if mt == "movie":
+            movie_ids.add(tid)
+        elif mt == "show":
+            show_ids.add(tid)
+        elif mt == "episode":
+            show_ids.add(tid)
+            episodes_by_show[tid] = episodes_by_show.get(tid, 0) + 1
+            watched_eps.setdefault(tid, set()).add((sn, ep))
+
+    total_episodes = sum(episodes_by_show.values())
+    all_ids = list(movie_ids | show_ids)
+    shows = await get_shows_bulk(all_ids)
+
+    genres: Counter = Counter()
+    for tid in all_ids:
+        d = shows.get(tid)
+        if d:
+            for g in d.get("genres", []):
+                genres[g] += 1
+
+    movie_minutes = sum((shows.get(t) or {}).get("runtime") or 0 for t in movie_ids)
+
+    # Episode minutes: per-episode runtime from the season cache, falling back to
+    # the show's average episode_run_time, then a 42-minute default.
+    episode_minutes = 0
+    if watched_eps:
+        ids = list(watched_eps)
+        qmarks = ",".join("?" * len(ids))
+        seasons_data: dict[tuple[int, int], dict] = {}
+        async with _conn() as db:
+            async with db.execute(
+                f"SELECT tmdb_id, season_number, data FROM seasons WHERE tmdb_id IN ({qmarks})", ids
+            ) as cur:
+                for tid, sn, data in await cur.fetchall():
+                    seasons_data[(tid, sn)] = json.loads(data)
+        for tid, eps in watched_eps.items():
+            ert = (shows.get(tid) or {}).get("episode_run_time") or []
+            default_rt = ert[0] if ert else 42
+            rt_by_ep: dict[tuple[int, int], int] = {}
+            for (tt, sn), sdata in seasons_data.items():
+                if tt != tid:
+                    continue
+                for e in sdata.get("episodes", []):
+                    if e.get("runtime"):
+                        rt_by_ep[(sn, e.get("episode_number"))] = e["runtime"]
+            for key in eps:
+                episode_minutes += rt_by_ep.get(key, default_rt)
+
+    top_shows = []
+    for tid, cnt in sorted(episodes_by_show.items(), key=lambda x: x[1], reverse=True)[:10]:
+        d = shows.get(tid) or {}
+        top_shows.append({
+            "id": tid, "title": d.get("title") or d.get("name") or "Unknown",
+            "poster_url": d.get("poster_url"), "episodes": cnt,
+        })
+
+    return {
+        "movies_watched": len(movie_ids),
+        "shows_watched": len(show_ids),
+        "episodes_watched": total_episodes,
+        "total_minutes": movie_minutes + episode_minutes,
+        "movie_minutes": movie_minutes,
+        "episode_minutes": episode_minutes,
+        "top_genres": [{"name": g, "count": c} for g, c in genres.most_common(10)],
+        "top_shows": top_shows,
+        "sources": sources,
     }
 
 

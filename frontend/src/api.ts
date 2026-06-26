@@ -69,6 +69,27 @@ export interface Recommendation {
   new_season?: boolean;   // resurfaced watched show with a new season available
 }
 
+export interface NextUpEpisode {
+  season: number;
+  episode: number;
+  name: string;
+  air_date: string | null;
+  still_url: string | null;
+  runtime: number | null;
+}
+
+export interface ViewingStats {
+  movies_watched: number;
+  shows_watched: number;
+  episodes_watched: number;
+  total_minutes: number;
+  movie_minutes: number;
+  episode_minutes: number;
+  top_genres: { name: string; count: number }[];
+  top_shows: { id: number; title: string; poster_url: string | null; episodes: number }[];
+  sources: Record<string, number>;
+}
+
 export interface UpcomingEpisode {
   first_aired: string;
   show: { title: string; ids: { tmdb?: number } };
@@ -249,6 +270,8 @@ export const api = {
   getWatchedLibrary: () => get<{ items: Recommendation[] }>(`/watched/library`),
   getAvailableEpisodes: () =>
     get<{ items: Record<string, [number, number]> }>(`/watched/available`),
+  getNextUp: () => get<{ items: Record<string, NextUpEpisode> }>(`/watched/next-up`),
+  getStats: () => get<ViewingStats>(`/stats`),
   getWatchlist: () => get<{ items: Recommendation[] }>(`/watchlist`),
   getWatchlistIds: () => get<{ tmdb_ids: number[] }>(`/watchlist/ids`),
   addWatchlist: (item: Recommendation) =>

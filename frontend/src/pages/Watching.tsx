@@ -1,7 +1,14 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { useWatched } from "../WatchedContext";
-import { api } from "../api";
+import { api, NextUpEpisode } from "../api";
 import DetailModal from "../components/DetailModal";
+import { SortControl } from "../components/SortControl";
+
+const SORTS = [
+  { id: "default", label: "New episode first" },
+  { id: "recent", label: "Recently watched" },
+  { id: "title", label: "Title A–Z" },
+];
 
 const PLACEHOLDER = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='300'%3E%3Crect width='200' height='300' fill='%231a1a24'/%3E%3C/svg%3E";
 
@@ -26,18 +33,36 @@ interface ShowDetail {
 }
 
 export default function Watching() {
-  const { partiallyWatchedIds, seasonProgress, isSeasonWatched, initSeasonTotals, showProgress, isDismissed, lastWatchedAt, isEpisodeWatched } = useWatched();
+  const { partiallyWatchedIds, seasonProgress, isSeasonWatched, initSeasonTotals, showProgress, isDismissed, lastWatchedAt, isEpisodeWatched, markEpisodeWatched, ownedLink } = useWatched();
   const [shows, setShows] = useState<ShowDetail[]>([]);
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState<number | null>(null);
   const [query, setQuery] = useState("");
+  const [sort, setSort] = useState("default");
   const [visibleCount, setVisibleCount] = useState(40);
   // Latest library-available episode per show (Jellyfin) → {id: [season, ep]}.
   const [availMap, setAvailMap] = useState<Record<string, [number, number]>>({});
+  // Next unwatched aired episode per show → {id: {season, episode, name, …}}.
+  const [nextUp, setNextUp] = useState<Record<string, NextUpEpisode>>({});
+
+  const refreshNextUp = useCallback(() => {
+    api.getNextUp().then(d => setNextUp(d.items || {})).catch(() => {});
+  }, []);
 
   useEffect(() => {
     api.getAvailableEpisodes().then(d => setAvailMap(d.items || {})).catch(() => {});
-  }, []);
+    refreshNextUp();
+  }, [refreshNextUp]);
+
+  // Mark the next episode watched straight from the card, then advance "next up".
+  async function markNext(show: ShowDetail, nu: NextUpEpisode) {
+    const total = show.seasons?.find(s => s.season_number === nu.season)?.episode_count;
+    try {
+      await api.markEpisodeWatched(show.id, show.title, nu.season, nu.episode);
+      markEpisodeWatched(show.id, nu.season, nu.episode, total);
+      refreshNextUp();
+    } catch { /* leave the row as-is so the user can retry */ }
+  }
 
   // "Ready to continue" = the newest downloaded episode hasn't been watched yet.
   const readyToContinue = (id: number) => {
@@ -74,8 +99,8 @@ export default function Watching() {
       .finally(() => setLoading(false));
   }, [candidateIds.join(",")]);
 
-  // Reset the visible window when the search changes
-  useEffect(() => { setVisibleCount(40); }, [query]);
+  // Reset the visible window when the search or sort changes
+  useEffect(() => { setVisibleCount(40); }, [query, sort]);
 
   // Show shows you're mid-way through, OR ones with a new downloaded episode to
   // watch (even if you'd previously finished everything that had aired).
@@ -83,10 +108,13 @@ export default function Watching() {
   const allInProgress = shows
     .filter(show => !isDismissed(show.id) && (showProgress(show.id) === "partial" || readyToContinue(show.id)))
     .sort((a, b) => {
+      if (sort === "title") return (a.title || "").localeCompare(b.title || "");
+      if (sort === "recent") return lastWatchedAt(b.id) - lastWatchedAt(a.id);
+      // default: a new episode ready on the server first, then most recently watched
       const ra = readyToContinue(a.id) ? 1 : 0;
       const rb = readyToContinue(b.id) ? 1 : 0;
-      if (ra !== rb) return rb - ra;                 // ready-to-continue on top
-      return lastWatchedAt(b.id) - lastWatchedAt(a.id);  // then by recency
+      if (ra !== rb) return rb - ra;
+      return lastWatchedAt(b.id) - lastWatchedAt(a.id);
     });
   const q = query.trim().toLowerCase();
   const inProgressShows = q
@@ -106,13 +134,20 @@ export default function Watching() {
 
   return (
     <div>
-      <p style={{ color: "var(--muted)", fontSize: 13, marginBottom: 12 }}>
-        {loading
-          ? "Loading…"
-          : q
-          ? `${inProgressShows.length} of ${allInProgress.length} shows`
-          : `${allInProgress.length} show${allInProgress.length !== 1 ? "s" : ""} in progress`}
-      </p>
+      <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
+        <p style={{ color: "var(--muted)", fontSize: 13, margin: 0 }}>
+          {loading
+            ? "Loading…"
+            : q
+            ? `${inProgressShows.length} of ${allInProgress.length} shows`
+            : `${allInProgress.length} show${allInProgress.length !== 1 ? "s" : ""} in progress`}
+        </p>
+        {allInProgress.length > 0 && (
+          <span style={{ marginLeft: "auto" }}>
+            <SortControl options={SORTS} value={sort} onChange={setSort} />
+          </span>
+        )}
+      </div>
 
       {/* Search */}
       {allInProgress.length > 0 && (
@@ -249,6 +284,40 @@ export default function Watching() {
                     ✓ {watchedSeasons} of {show.number_of_seasons} season{show.number_of_seasons !== 1 ? "s" : ""} complete
                   </div>
                 )}
+
+                {/* Next unwatched episode — one-tap continue without opening the modal */}
+                {(() => {
+                  const nu = nextUp[String(show.id)];
+                  if (!nu) return null;
+                  const link = ownedLink(show.id);
+                  const pad = (n: number) => String(n).padStart(2, "0");
+                  return (
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
+                      <span style={{ fontSize: 12, color: "var(--text)", fontWeight: 600 }}>
+                        ▶ Next: S{pad(nu.season)}E{pad(nu.episode)}{nu.name ? ` — ${nu.name}` : ""}
+                      </span>
+                      <button
+                        onClick={e => { e.stopPropagation(); markNext(show, nu); }}
+                        style={{
+                          padding: "3px 10px", borderRadius: 20, border: "1px solid var(--border)",
+                          background: "var(--surface2)", color: "var(--text)", fontSize: 11,
+                          fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap",
+                        }}
+                      >✓ Mark watched</button>
+                      {link?.url && (
+                        <a
+                          href={link.url} target="_blank" rel="noreferrer"
+                          onClick={e => e.stopPropagation()}
+                          style={{
+                            padding: "3px 10px", borderRadius: 20, border: "1px solid var(--border)",
+                            background: "var(--accent)", color: "#fff", fontSize: 11,
+                            fontWeight: 600, textDecoration: "none", whiteSpace: "nowrap",
+                          }}
+                        >▶ Play</a>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           );

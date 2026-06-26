@@ -232,6 +232,13 @@ async def get_available_episodes(pid: int = Depends(get_profile_id)):
     return {"items": items}
 
 
+@router.get("/next-up")
+async def get_next_up(pid: int = Depends(get_profile_id)):
+    """Next unwatched aired episode per in-progress show, for the Watching page's
+    one-tap continue: {tmdb_id: {season, episode, name, air_date, still_url, runtime}}."""
+    return {"items": await database.get_next_up(pid)}
+
+
 @router.get("/sources")
 async def get_watch_sources(pid: int = Depends(get_profile_id)):
     return await database.get_watch_state_stats(pid)
