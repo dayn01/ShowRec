@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useWatched } from "../WatchedContext";
 import { api } from "../api";
 import DetailModal from "../components/DetailModal";
@@ -45,11 +45,22 @@ export default function Watching() {
     return a ? !isEpisodeWatched(id, a[0], a[1]) : false;
   };
 
+  // Candidate shows = mid-watching shows PLUS any show (even one you'd "finished")
+  // whose newest downloaded episode is unwatched — so a new episode resurfaces it.
+  const candidateIds = useMemo(() => {
+    const ids = new Set<number>(partiallyWatchedIds);
+    for (const [id, a] of Object.entries(availMap)) {
+      const tid = Number(id);
+      if (a && !isEpisodeWatched(tid, a[0], a[1])) ids.add(tid);
+    }
+    return [...ids];
+  }, [partiallyWatchedIds.join(","), availMap, isEpisodeWatched]);
+
   useEffect(() => {
-    if (partiallyWatchedIds.length === 0) { setShows([]); return; }
+    if (candidateIds.length === 0) { setShows([]); return; }
     setLoading(true);
     // One batched request instead of one per show — far faster with a long list.
-    api.getDetailsBatch(partiallyWatchedIds)
+    api.getDetailsBatch(candidateIds)
       .then(({ shows: valid }) => {
         setShows(valid as ShowDetail[]);
         // Seed TMDB episode counts into context so progress bars are accurate
@@ -61,15 +72,16 @@ export default function Watching() {
       })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [partiallyWatchedIds.join(",")]);
+  }, [candidateIds.join(",")]);
 
   // Reset the visible window when the search changes
   useEffect(() => { setVisibleCount(40); }, [query]);
 
-  // Only show shows that still have unwatched episodes (progress = "partial").
+  // Show shows you're mid-way through, OR ones with a new downloaded episode to
+  // watch (even if you'd previously finished everything that had aired).
   // Sort: a new episode ready on the server first, then most recently watched.
   const allInProgress = shows
-    .filter(show => showProgress(show.id) === "partial" && !isDismissed(show.id))
+    .filter(show => !isDismissed(show.id) && (showProgress(show.id) === "partial" || readyToContinue(show.id)))
     .sort((a, b) => {
       const ra = readyToContinue(a.id) ? 1 : 0;
       const rb = readyToContinue(b.id) ? 1 : 0;
@@ -82,7 +94,7 @@ export default function Watching() {
     : allInProgress;
   const shownShows = inProgressShows.slice(0, visibleCount);
 
-  if (!loading && partiallyWatchedIds.length === 0) {
+  if (!loading && candidateIds.length === 0) {
     return (
       <div style={{ textAlign: "center", padding: 80, color: "var(--muted)" }}>
         <div style={{ fontSize: 40, marginBottom: 16 }}>📺</div>
