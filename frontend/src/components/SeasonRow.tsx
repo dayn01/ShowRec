@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { useWatched } from "../WatchedContext";
 import { useIsMobile } from "../useIsMobile";
@@ -181,6 +181,10 @@ export default function SeasonRow({ season, tmdbId, showTitle, autoExpand = fals
   const effStatus = reqState === "done" ? "processing"
     : (seasonStatus && seasonStatus !== "unknown" ? seasonStatus : "none");
   const seasonRequested = effStatus !== "none";   // anything but "none" disables re-request
+  // A still-downloading request can be cancelled; "available"/"partial" are on disk.
+  const cancelable = effStatus === "pending" || effStatus === "processing";
+  const [cancelState, setCancelState] = useState<"idle" | "canceling">("idle");
+  const queryClient = useQueryClient();
   const isMobile = useIsMobile();
 
   async function requestSeason(e: React.MouseEvent) {
@@ -193,6 +197,23 @@ export default function SeasonRow({ season, tmdbId, showTitle, autoExpand = fals
     } catch {
       setReqState("error");
       setTimeout(() => setReqState("idle"), 2500);
+    }
+  }
+
+  async function cancelSeason(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (cancelState === "canceling") return;
+    setCancelState("canceling");
+    try {
+      await api.cancelRequest(tmdbId, "tv", [season.season_number]);
+      setReqState("idle");
+      // Refetch the per-show status so this (and any seasons cancelled alongside it)
+      // flip back to requestable.
+      queryClient.invalidateQueries({ queryKey: ["request-status", "tv", tmdbId] });
+    } catch {
+      // leave the request button as-is; user can retry
+    } finally {
+      setCancelState("idle");
     }
   }
 
@@ -319,25 +340,45 @@ export default function SeasonRow({ season, tmdbId, showTitle, autoExpand = fals
               : effStatus === "partial" ? "Some episodes are available"
               : effStatus !== "none" ? "Waiting on download"
               : "Request this season via Overseerr/Jellyseerr";
+            const canceling = cancelState === "canceling";
             return (
-              <button
-                onClick={requestSeason}
-                disabled={sending || seasonRequested}
-                title={title}
-                style={{
-                  padding: isMobile ? "5px 9px" : "5px 12px",
-                  borderRadius: 20, border: "1px solid var(--border)",
-                  cursor: sending ? "wait" : seasonRequested ? "default" : "pointer",
-                  fontWeight: 600, fontSize: 12, whiteSpace: "nowrap", flexShrink: 0,
-                  background: error ? "var(--red)" : cfg.bg,
-                  color: error ? "#fff" : cfg.color,
-                  transition: "background 0.2s",
-                }}
-              >
-                {isMobile
-                  ? (sending ? "…" : error ? "✕" : cfg.mobile)
-                  : (sending ? "Requesting…" : error ? "Error" : cfg.label)}
-              </button>
+              <>
+                <button
+                  onClick={requestSeason}
+                  disabled={sending || seasonRequested}
+                  title={title}
+                  style={{
+                    padding: isMobile ? "5px 9px" : "5px 12px",
+                    borderRadius: 20, border: "1px solid var(--border)",
+                    cursor: sending ? "wait" : seasonRequested ? "default" : "pointer",
+                    fontWeight: 600, fontSize: 12, whiteSpace: "nowrap", flexShrink: 0,
+                    background: error ? "var(--red)" : cfg.bg,
+                    color: error ? "#fff" : cfg.color,
+                    transition: "background 0.2s",
+                  }}
+                >
+                  {isMobile
+                    ? (sending ? "…" : error ? "✕" : cfg.mobile)
+                    : (sending ? "Requesting…" : error ? "Error" : cfg.label)}
+                </button>
+                {cancelable && (
+                  <button
+                    onClick={cancelSeason}
+                    disabled={canceling}
+                    title="Cancel this season's request"
+                    style={{
+                      padding: isMobile ? "5px 9px" : "5px 12px",
+                      borderRadius: 20, border: "1px solid var(--border)",
+                      cursor: canceling ? "wait" : "pointer",
+                      fontWeight: 600, fontSize: 12, whiteSpace: "nowrap", flexShrink: 0,
+                      background: "var(--surface2)", color: "var(--muted)",
+                      transition: "background 0.2s",
+                    }}
+                  >
+                    {canceling ? "…" : (isMobile ? "✕" : "✕ Cancel")}
+                  </button>
+                )}
+              </>
             );
           })()}
           <SeenBtn watched={isFullyWatched} partial={!!isPartial} state={state} onMark={markSeason} onUnmark={unmarkSeason} />

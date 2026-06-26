@@ -32,7 +32,8 @@ async def create_request(body: RequestBody):
 @router.delete("")
 async def cancel_request(body: RequestBody):
     _require_configured()
-    result = await overseerr.cancel_request(body.tmdb_id, body.media_type)
+    # seasons set (TV) → cancel just those seasons' request(s); None → cancel all.
+    result = await overseerr.cancel_request(body.tmdb_id, body.media_type, body.seasons)
     if not result["ok"]:
         raise HTTPException(status_code=502, detail=result.get("detail") or "Overseerr cancel failed")
     return result

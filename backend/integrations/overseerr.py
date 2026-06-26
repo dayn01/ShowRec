@@ -122,28 +122,49 @@ async def get_all_statuses() -> dict[int, str]:
     return result
 
 
-async def cancel_request(tmdb_id: int, media_type: str) -> dict:
+async def cancel_request(tmdb_id: int, media_type: str, seasons: list[int] | None = None) -> dict:
     """
-    Cancel the Overseerr request(s) for a title. Looks up the request ids from the
-    media detail (mediaInfo.requests) and DELETEs each. Returns
-    {"ok": bool, "cancelled": int, "status": str}.
+    Cancel Overseerr request(s) for a title. Looks up the request ids from the media
+    detail (mediaInfo.requests) and DELETEs each. With `seasons` given (TV only),
+    cancel just the request object(s) covering those seasons; otherwise cancel all.
+
+    Overseerr can't drop a single season from a multi-season request, so cancelling a
+    season removes the whole request object it belongs to — `also_affected` lists any
+    other seasons that came down with it (usually empty, since the app requests
+    seasons individually). Returns
+    {"ok": bool, "cancelled": int, "status": str, "also_affected": list[int]}.
     """
     kind = "movie" if media_type == "movie" else "tv"
+    want = set(seasons or [])
     try:
         async with httpx.AsyncClient(timeout=15) as client:
             r = await client.get(f"{_base()}/api/v1/{kind}/{tmdb_id}", headers=_headers())
             if r.status_code != 200:
                 return {"ok": False, "status": "error", "detail": f"lookup {r.status_code}"}
             info = (r.json() or {}).get("mediaInfo") or {}
-            req_ids = [req.get("id") for req in (info.get("requests") or []) if req.get("id")]
+            req_ids: list[int] = []
+            also: set[int] = set()
+            for req in (info.get("requests") or []):
+                rid = req.get("id")
+                if not rid:
+                    continue
+                # No season filter (or a movie): every request object qualifies.
+                if not want or kind == "movie":
+                    req_ids.append(rid)
+                    continue
+                req_seasons = [rs.get("seasonNumber") for rs in (req.get("seasons") or [])]
+                if want.intersection(req_seasons):
+                    req_ids.append(rid)
+                    also.update(s for s in req_seasons if s is not None and s not in want)
             if not req_ids:
-                return {"ok": True, "cancelled": 0, "status": "no_request"}
+                return {"ok": True, "cancelled": 0, "status": "no_request", "also_affected": []}
             cancelled = 0
             for rid in req_ids:
                 dr = await client.delete(f"{_base()}/api/v1/request/{rid}", headers=_headers())
                 if dr.status_code in (200, 204):
                     cancelled += 1
-            return {"ok": cancelled > 0, "cancelled": cancelled, "status": "cancelled"}
+            return {"ok": cancelled > 0, "cancelled": cancelled, "status": "cancelled",
+                    "also_affected": sorted(also)}
     except Exception as e:
         return {"ok": False, "status": "error", "detail": str(e)}
 
