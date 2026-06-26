@@ -41,6 +41,11 @@ interface WatchedContextType {
   like: (tmdbId: number, mediaType: string, title: string) => void;
   unlike: (tmdbId: number, mediaType: string) => void;
 
+  // Stopped watching — neutral "done with it" (off Watching, keeps progress)
+  isStopped: (tmdbId: number) => boolean;
+  stop: (tmdbId: number, mediaType: string, title: string) => void;
+  resume: (tmdbId: number, mediaType: string) => void;
+
   // Watchlist
   isWatchlisted: (tmdbId: number) => boolean;
   toggleWatchlist: (item: any) => void;
@@ -59,6 +64,7 @@ const WatchedContext = createContext<WatchedContextType>({
   isEpisodeWatched: () => false, markEpisodeWatched: () => {}, markEpisodeUnwatched: () => {},
   isDismissed: () => false, dismiss: () => {}, undismiss: () => {},
   isLiked: () => false, like: () => {}, unlike: () => {},
+  isStopped: () => false, stop: () => {}, resume: () => {},
   isWatchlisted: () => false, toggleWatchlist: () => {},
   isOwned: () => false, ownedLink: () => null,
 });
@@ -92,6 +98,7 @@ export function WatchedProvider({ children }: { children: ReactNode }) {
   const [progressMap, setProgressMap] = useState<Map<string, SeasonProgress>>(() => loadMap("wc_progress"));
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(() => loadSet("wc_dismissed"));
   const [likedIds, setLikedIds] = useState<Set<string>>(() => loadSet("wc_liked"));
+  const [stoppedIds, setStoppedIds] = useState<Set<string>>(() => loadSet("wc_stopped"));
   const [watchlistIds, setWatchlistIds] = useState<Set<string>>(() => loadSet("wc_watchlist"));
   const [ownedMap, setOwnedMap] = useState<Record<string, { source: string; url: string | null }>>({});
   const [lastWatchedMap, setLastWatchedMap] = useState<Record<string, number>>({});
@@ -101,6 +108,7 @@ export function WatchedProvider({ children }: { children: ReactNode }) {
   useEffect(() => { saveMap("wc_progress", progressMap); }, [progressMap]);
   useEffect(() => { saveSet("wc_dismissed", dismissedIds); }, [dismissedIds]);
   useEffect(() => { saveSet("wc_liked", likedIds); }, [likedIds]);
+  useEffect(() => { saveSet("wc_stopped", stoppedIds); }, [stoppedIds]);
   useEffect(() => { saveSet("wc_watchlist", watchlistIds); }, [watchlistIds]);
 
   // Load dismissals + watchlist from backend
@@ -115,6 +123,10 @@ export function WatchedProvider({ children }: { children: ReactNode }) {
     fetch("/api/watched/liked", { headers: pidHeaders() })
       .then(r => r.ok ? r.json() : null)
       .then(data => { if (data) setLikedIds(new Set((data.tmdb_ids ?? []).map(String))); })
+      .catch(() => {});
+    fetch("/api/watched/stopped", { headers: pidHeaders() })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (data) setStoppedIds(new Set((data.tmdb_ids ?? []).map(String))); })
       .catch(() => {});
     fetch("/api/watchlist/ids", { headers: pidHeaders() })
       .then(r => r.ok ? r.json() : null)
@@ -395,6 +407,28 @@ export function WatchedProvider({ children }: { children: ReactNode }) {
     }).catch(() => {});
   }, []);
 
+  // ── Stopped watching ─────────────────────────────────────────────────────────
+  const isStopped = useCallback((id: number) => stoppedIds.has(String(id)), [stoppedIds]);
+
+  const stop = useCallback((id: number, mediaType: string, title: string) => {
+    setStoppedIds(p => new Set([...p, String(id)]));
+    // Drop the show-level "fully seen" flag so it leaves Watched immediately; the
+    // per-episode progress is kept (server keeps the episode rows).
+    setWatchedShows(p => { const s = new Set(p); s.delete(String(id)); return s; });
+    fetch("/api/watched/stop", {
+      method: "POST", headers: pidHeaders(),
+      body: JSON.stringify({ tmdb_id: id, media_type: mediaType, title }),
+    }).catch(() => {});
+  }, []);
+
+  const resume = useCallback((id: number, mediaType: string) => {
+    setStoppedIds(p => { const s = new Set(p); s.delete(String(id)); return s; });
+    fetch("/api/watched/stop", {
+      method: "DELETE", headers: pidHeaders(),
+      body: JSON.stringify({ tmdb_id: id, media_type: mediaType }),
+    }).catch(() => {});
+  }, []);
+
   // ── Watchlist ──────────────────────────────────────────────────────────────
   const isWatchlisted = useCallback((id: number) => watchlistIds.has(String(id)), [watchlistIds]);
 
@@ -433,6 +467,7 @@ export function WatchedProvider({ children }: { children: ReactNode }) {
       isEpisodeWatched, markEpisodeWatched, markEpisodeUnwatched,
       isDismissed, dismiss, undismiss,
       isLiked, like, unlike,
+      isStopped, stop, resume,
       isWatchlisted, toggleWatchlist,
       isOwned, ownedLink,
     }}>

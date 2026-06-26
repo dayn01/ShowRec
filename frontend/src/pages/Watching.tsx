@@ -33,7 +33,7 @@ interface ShowDetail {
 }
 
 export default function Watching() {
-  const { partiallyWatchedIds, seasonProgress, isSeasonWatched, initSeasonTotals, showProgress, isDismissed, lastWatchedAt, isEpisodeWatched, markEpisodeWatched, ownedLink } = useWatched();
+  const { partiallyWatchedIds, seasonProgress, isSeasonWatched, initSeasonTotals, showProgress, isDismissed, lastWatchedAt, isEpisodeWatched, markEpisodeWatched, ownedLink, isStopped } = useWatched();
   const [shows, setShows] = useState<ShowDetail[]>([]);
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState<number | null>(null);
@@ -78,8 +78,8 @@ export default function Watching() {
       const tid = Number(id);
       if (a && !isEpisodeWatched(tid, a[0], a[1])) ids.add(tid);
     }
-    return [...ids];
-  }, [partiallyWatchedIds.join(","), availMap, isEpisodeWatched]);
+    return [...ids].filter(id => !isStopped(id));   // shows you've stopped drop off
+  }, [partiallyWatchedIds.join(","), availMap, isEpisodeWatched, isStopped]);
 
   useEffect(() => {
     if (candidateIds.length === 0) { setShows([]); return; }
@@ -106,7 +106,7 @@ export default function Watching() {
   // watch (even if you'd previously finished everything that had aired).
   // Sort: a new episode ready on the server first, then most recently watched.
   const allInProgress = shows
-    .filter(show => !isDismissed(show.id) && (showProgress(show.id) === "partial" || readyToContinue(show.id)))
+    .filter(show => !isDismissed(show.id) && !isStopped(show.id) && (showProgress(show.id) === "partial" || readyToContinue(show.id)))
     .sort((a, b) => {
       if (sort === "title") return (a.title || "").localeCompare(b.title || "");
       if (sort === "recent") return lastWatchedAt(b.id) - lastWatchedAt(a.id);

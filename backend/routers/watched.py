@@ -319,6 +319,30 @@ async def list_liked(pid: int = Depends(get_profile_id)):
     return {"tmdb_ids": await database.get_liked_ids(pid)}
 
 
+@router.post("/stop")
+async def stop_watching(item: DismissItem, pid: int = Depends(get_profile_id)):
+    """Mark a show 'stopped watching' — removes it from Watching/Watched without a
+    dismissal's negative taste signal, keeping the episodes you actually watched."""
+    await database.add_stopped(pid, item.tmdb_id, item.media_type, item.title)
+    return {"status": "stopped"}
+
+
+@router.delete("/stop")
+async def resume_watching(item: DismissItem, pid: int = Depends(get_profile_id)):
+    await database.remove_stopped(pid, item.tmdb_id)
+    return {"status": "resumed"}
+
+
+@router.get("/stopped")
+async def list_stopped(pid: int = Depends(get_profile_id)):
+    return {"tmdb_ids": await database.get_stopped_ids(pid)}
+
+
+@router.get("/stopped/list")
+async def list_stopped_full(pid: int = Depends(get_profile_id)):
+    return {"items": await database.get_stopped_full(pid)}
+
+
 @router.get("/dismissed")
 async def list_dismissed(pid: int = Depends(get_profile_id)):
     return {"tmdb_ids": await database.get_dismissed_ids(pid)}

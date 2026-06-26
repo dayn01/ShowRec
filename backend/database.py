@@ -213,6 +213,16 @@ async def init():
                 liked_at   INTEGER NOT NULL,
                 PRIMARY KEY (profile_id, tmdb_id, media_type)
             );
+            -- "Stopped watching" — neutral: removed from Watching/Watched without
+            -- the negative signal of a dismissal. Partial progress is preserved.
+            CREATE TABLE IF NOT EXISTS stopped (
+                profile_id INTEGER NOT NULL DEFAULT 1,
+                tmdb_id    INTEGER NOT NULL,
+                media_type TEXT NOT NULL,
+                title      TEXT,
+                stopped_at INTEGER NOT NULL,
+                PRIMARY KEY (profile_id, tmdb_id, media_type)
+            );
             CREATE INDEX IF NOT EXISTS idx_shows_cached   ON shows(cached_at);
             CREATE INDEX IF NOT EXISTS idx_seasons_cached ON seasons(cached_at);
         """)
@@ -306,7 +316,7 @@ async def upsert_default_profile(name: str = "Me", emoji: str = "🍿",
 
 async def delete_profile(profile_id: int):
     async with _conn() as db:
-        for t in ("watch_state", "dismissed", "watchlist", "liked"):
+        for t in ("watch_state", "dismissed", "watchlist", "liked", "stopped"):
             await db.execute(f"DELETE FROM {t} WHERE profile_id=?", (profile_id,))
         await db.execute("DELETE FROM profiles WHERE id=?", (profile_id,))
         await db.commit()
@@ -395,6 +405,61 @@ async def get_liked_for_recommendations(profile_id: int) -> list[dict]:
             rows = await cur.fetchall()
     return [{"tmdb_id": t, "media_type": mt, "title": title or "", "genres": []}
             for t, mt, title in rows]
+
+
+# ── Stopped watching (neutral "I'm done with this" — no taste penalty) ─────────
+
+async def add_stopped(profile_id: int, tmdb_id: int, media_type: str, title: str = ""):
+    async with _conn() as db:
+        await db.execute(
+            "INSERT OR REPLACE INTO stopped (profile_id, tmdb_id, media_type, title, stopped_at) VALUES (?,?,?,?,?)",
+            (profile_id, tmdb_id, "tv" if media_type == "tv" else "movie", title, int(time.time()))
+        )
+        # A stopped show isn't "fully seen" — drop any show-level completion mark so
+        # it leaves the Watched library, but KEEP the episode rows (real progress).
+        await db.execute(
+            "DELETE FROM watch_state WHERE profile_id=? AND tmdb_id=? AND media_type='show'",
+            (profile_id, tmdb_id)
+        )
+        await db.commit()
+
+
+async def remove_stopped(profile_id: int, tmdb_id: int):
+    async with _conn() as db:
+        await db.execute("DELETE FROM stopped WHERE profile_id=? AND tmdb_id=?", (profile_id, tmdb_id))
+        await db.commit()
+
+
+async def get_stopped_ids(profile_id: int) -> list[int]:
+    async with _conn() as db:
+        async with db.execute("SELECT tmdb_id FROM stopped WHERE profile_id=?", (profile_id,)) as cur:
+            return [r[0] for r in await cur.fetchall()]
+
+
+async def get_stopped_full(profile_id: int) -> list[dict]:
+    """Stopped titles with poster/title (from the shows cache), newest first."""
+    async with _conn() as db:
+        async with db.execute(
+            "SELECT tmdb_id, media_type, title, stopped_at FROM stopped WHERE profile_id=? ORDER BY stopped_at DESC",
+            (profile_id,)
+        ) as cur:
+            rows = await cur.fetchall()
+    shows = await get_shows_bulk([r[0] for r in rows])
+    items = []
+    for tmdb_id, media_type, title, _ in rows:
+        cached = shows.get(tmdb_id)
+        items.append({
+            "id": tmdb_id,
+            "tmdb_id": tmdb_id,
+            "media_type": media_type,
+            "title": (cached and (cached.get("title") or cached.get("name"))) or title or "Unknown",
+            "poster_url": cached.get("poster_url") if cached else None,
+            "vote_average": cached.get("vote_average", 0) if cached else 0,
+            "overview": cached.get("overview", "") if cached else "",
+            "release_date": cached.get("release_date") if cached else None,
+            "first_air_date": cached.get("first_air_date") if cached else None,
+        })
+    return items
 
 
 # ── Watchlist ─────────────────────────────────────────────────────────────────

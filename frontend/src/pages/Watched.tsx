@@ -5,7 +5,7 @@ import MediaCard from "../components/MediaCard";
 import DetailModal from "../components/DetailModal";
 import { SortControl, sortRecommendations } from "../components/SortControl";
 
-type SubTab = "tv" | "movie";
+type SubTab = "tv" | "movie" | "stopped";
 
 const SORTS = [
   { id: "recent", label: "Recently watched" },
@@ -15,8 +15,9 @@ const SORTS = [
 ];
 
 export default function Watched() {
-  const { isWatched, showProgress } = useWatched();
+  const { isWatched, showProgress, isStopped } = useWatched();
   const [items, setItems] = useState<Recommendation[]>([]);
+  const [stoppedItems, setStoppedItems] = useState<Recommendation[]>([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<SubTab>("tv");
   const [query, setQuery] = useState("");
@@ -29,6 +30,7 @@ export default function Watched() {
       .then(d => setItems(d.items))
       .catch(() => setItems([]))
       .finally(() => setLoading(false));
+    api.getStoppedList().then(d => setStoppedItems(d.items)).catch(() => {});
   }, []);
 
   // Reset the visible window when the tab, search or sort changes
@@ -39,21 +41,28 @@ export default function Watched() {
     i.media_type === "tv" ? showProgress(i.id) === "full" : isWatched(i.id);
 
   const q = query.trim().toLowerCase();
-  const filtered = items
-    .filter(i => i.media_type === tab)
-    .filter(stillWatched)
-    .filter(i => !q || (i.title || i.name || "").toLowerCase().includes(q));
+  // Filter the fetched stopped list by live state so a resume drops it instantly.
+  const liveStopped = stoppedItems.filter(i => isStopped(i.id));
+  const base = tab === "stopped"
+    ? liveStopped
+    : items.filter(i => i.media_type === tab && !isStopped(i.id) && stillWatched(i));
+  const filtered = base.filter(i => !q || (i.title || i.name || "").toLowerCase().includes(q));
   const visible = sortRecommendations(filtered, sort);
   const shown = visible.slice(0, visibleCount);
 
-  const tvCount = items.filter(i => i.media_type === "tv" && stillWatched(i)).length;
-  const movieCount = items.filter(i => i.media_type === "movie" && stillWatched(i)).length;
+  const tvCount = items.filter(i => i.media_type === "tv" && !isStopped(i.id) && stillWatched(i)).length;
+  const movieCount = items.filter(i => i.media_type === "movie" && !isStopped(i.id) && stillWatched(i)).length;
+  const stoppedCount = liveStopped.length;
 
   return (
     <div>
       {/* Sub-tabs */}
       <div style={{ display: "flex", gap: 6, marginBottom: 16 }}>
-        {([["tv", `TV Shows${tvCount ? ` (${tvCount})` : ""}`], ["movie", `Films${movieCount ? ` (${movieCount})` : ""}`]] as const).map(([id, label]) => (
+        {([
+          ["tv", `TV Shows${tvCount ? ` (${tvCount})` : ""}`],
+          ["movie", `Films${movieCount ? ` (${movieCount})` : ""}`],
+          ...(stoppedCount ? [["stopped", `⏹ Stopped (${stoppedCount})`]] : []),
+        ] as [SubTab, string][]).map(([id, label]) => (
           <button key={id} onClick={() => setTab(id)} style={{
             padding: "7px 18px", borderRadius: 20, fontSize: 13,
             border: tab === id ? "1px solid var(--accent)" : "1px solid var(--border)",
@@ -71,7 +80,7 @@ export default function Watched() {
         <input
           value={query}
           onChange={e => setQuery(e.target.value)}
-          placeholder={`Search watched ${tab === "tv" ? "shows" : "films"}…`}
+          placeholder={`Search ${tab === "stopped" ? "stopped shows" : tab === "tv" ? "watched shows" : "watched films"}…`}
           style={{
             width: "100%", padding: "10px 14px 10px 38px",
             background: "var(--surface)", border: "1px solid var(--border)",
@@ -97,7 +106,12 @@ export default function Watched() {
       {!loading && visible.length === 0 && (
         <div style={{ color: "var(--muted)", textAlign: "center", padding: 60, fontSize: 14 }}>
           {q
-            ? `No watched ${tab === "tv" ? "shows" : "films"} match "${query}".`
+            ? `No ${tab === "stopped" ? "stopped shows" : tab === "tv" ? "watched shows" : "watched films"} match "${query}".`
+            : tab === "stopped"
+            ? <>
+                <div style={{ fontSize: 36, marginBottom: 12 }}>⏹</div>
+                Shows you stop watching will appear here. Open a show and choose “Stop watching”.
+              </>
             : <>
                 <div style={{ fontSize: 36, marginBottom: 12 }}>✓</div>
                 No watched {tab === "tv" ? "TV shows" : "films"} yet. Mark something as Seen and it'll appear here.
@@ -125,7 +139,11 @@ export default function Watched() {
       )}
 
       {selected && (
-        <DetailModal tmdbId={selected.id} mediaType={selected.mediaType} onClose={() => setSelected(null)} />
+        <DetailModal tmdbId={selected.id} mediaType={selected.mediaType} onClose={() => {
+          setSelected(null);
+          // Pick up any show just stopped/resumed from the modal.
+          api.getStoppedList().then(d => setStoppedItems(d.items)).catch(() => {});
+        }} />
       )}
     </div>
   );

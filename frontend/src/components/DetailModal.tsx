@@ -139,7 +139,7 @@ export default function DetailModal({ tmdbId, mediaType, onClose }: Props) {
 
   const { isWatched, markWatched, markUnwatched, markShowComplete, initSeasonTotals,
           isWatchlisted, toggleWatchlist, dismiss, showProgress, isSeasonWatched, ownedLink,
-          isLiked, like, unlike } = useWatched();
+          isLiked, like, unlike, isStopped, stop, resume } = useWatched();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
 
@@ -210,6 +210,12 @@ export default function DetailModal({ tmdbId, mediaType, onClose }: Props) {
     if (!data) return;
     if (isLiked(data.id)) unlike(data.id, data.media_type);
     else like(data.id, data.media_type, data.title);
+  }
+
+  function toggleStopped() {
+    if (!data) return;
+    if (isStopped(data.id)) resume(data.id, data.media_type);
+    else stop(data.id, data.media_type, data.title);
   }
 
   const score = data ? Math.round(data.vote_average * 10) : 0;
@@ -351,6 +357,23 @@ export default function DetailModal({ tmdbId, mediaType, onClose }: Props) {
                   >
                     {data && isLiked(data.id) ? "♥ Liked" : "♡ Like"}
                   </button>
+
+                  {data.media_type === "tv" && (
+                    <button
+                      onClick={toggleStopped}
+                      title={isStopped(data.id)
+                        ? "Stopped watching — click to move back to Watching"
+                        : "Stop watching — remove from Watching without marking it complete or hiding it"}
+                      style={{
+                        padding: "8px 16px", borderRadius: 20,
+                        border: "1px solid var(--border)", cursor: "pointer", fontWeight: 600, fontSize: 13,
+                        background: isStopped(data.id) ? "var(--accent)" : "var(--surface2)",
+                        color: isStopped(data.id) ? "#fff" : "var(--muted)",
+                      }}
+                    >
+                      {isStopped(data.id) ? "⏹ Stopped" : "⏸ Stop watching"}
+                    </button>
+                  )}
 
                   <button
                     onClick={notInterested}
