@@ -18,6 +18,7 @@ interface WatchedContextType {
   markShowComplete: (tmdbId: number, seasons: { season_number: number; total: number; watched: number[] }[]) => void;
   showProgress: (tmdbId: number) => "none" | "partial" | "full";
   partiallyWatchedIds: number[];
+  lastWatchedAt: (tmdbId: number) => number;   // epoch secs of most recent watch (0 if none)
 
   // Called when show detail opens — seeds TMDB totals for all seasons at once
   initSeasonTotals: (tmdbId: number, seasons: { season_number: number; episode_count: number }[]) => void;
@@ -51,7 +52,7 @@ interface WatchedContextType {
 
 const WatchedContext = createContext<WatchedContextType>({
   isWatched: () => false, markWatched: () => {}, markUnwatched: () => {}, markShowComplete: () => {},
-  showProgress: () => "none", partiallyWatchedIds: [],
+  showProgress: () => "none", partiallyWatchedIds: [], lastWatchedAt: () => 0,
   initSeasonTotals: () => {}, updateSeasonTotal: () => {},
   isSeasonWatched: () => false, seasonProgress: () => null,
   markSeasonWatched: () => {}, markSeasonUnwatched: () => {},
@@ -93,6 +94,7 @@ export function WatchedProvider({ children }: { children: ReactNode }) {
   const [likedIds, setLikedIds] = useState<Set<string>>(() => loadSet("wc_liked"));
   const [watchlistIds, setWatchlistIds] = useState<Set<string>>(() => loadSet("wc_watchlist"));
   const [ownedMap, setOwnedMap] = useState<Record<string, { source: string; url: string | null }>>({});
+  const [lastWatchedMap, setLastWatchedMap] = useState<Record<string, number>>({});
 
   useEffect(() => { saveSet("wc_shows", watchedShows); }, [watchedShows]);
   useEffect(() => { saveSet("wc_episodes", watchedEpisodes); }, [watchedEpisodes]);
@@ -149,6 +151,11 @@ export function WatchedProvider({ children }: { children: ReactNode }) {
       });
       return m;
     });
+
+    // Per-show last-watched time (keys come back as strings from JSON).
+    const lw: Record<string, number> = {};
+    for (const [id, ts] of Object.entries(data.last_watched ?? {})) lw[String(id)] = Number(ts);
+    setLastWatchedMap(lw);
   }, []);
 
   // Fast read of the stored state.
@@ -237,6 +244,8 @@ export function WatchedProvider({ children }: { children: ReactNode }) {
 
     return "partial";
   }, [watchedShows, watchedEpisodes, progressMap]);
+
+  const lastWatchedAt = useCallback((id: number) => lastWatchedMap[String(id)] ?? 0, [lastWatchedMap]);
 
   const partiallyWatchedIds = (() => {
     const ids = new Set<number>();
@@ -418,7 +427,7 @@ export function WatchedProvider({ children }: { children: ReactNode }) {
 
   return (
     <WatchedContext.Provider value={{
-      isWatched, markWatched, markUnwatched, markShowComplete, showProgress, partiallyWatchedIds,
+      isWatched, markWatched, markUnwatched, markShowComplete, showProgress, partiallyWatchedIds, lastWatchedAt,
       initSeasonTotals, updateSeasonTotal,
       isSeasonWatched, seasonProgress, markSeasonWatched, markSeasonUnwatched,
       isEpisodeWatched, markEpisodeWatched, markEpisodeUnwatched,

@@ -567,7 +567,7 @@ async def get_watch_state(profile_id: int) -> dict:
     """Returns the full local watch state for the frontend."""
     async with _conn() as db:
         async with db.execute(
-            "SELECT media_type, tmdb_id, season_number, episode_number FROM watch_state WHERE profile_id=?",
+            "SELECT media_type, tmdb_id, season_number, episode_number, watched_at FROM watch_state WHERE profile_id=?",
             (profile_id,)
         ) as cur:
             rows = await cur.fetchall()
@@ -577,8 +577,11 @@ async def get_watch_state(profile_id: int) -> dict:
         episodes = []
         season_counts: dict[tuple[int, int], int] = {}
         watched_by_show: dict[int, set] = {}
+        last_watched: dict[int, int] = {}   # tmdb_id -> most recent watched_at (for sorting)
 
-        for media_type, tmdb_id, season, episode in rows:
+        for media_type, tmdb_id, season, episode, watched_at in rows:
+            if watched_at and watched_at > last_watched.get(tmdb_id, 0):
+                last_watched[tmdb_id] = watched_at
             if media_type in ("movie", "show"):
                 tmdb_ids.add(tmdb_id)
             elif media_type == "episode":
@@ -638,6 +641,7 @@ async def get_watch_state(profile_id: int) -> dict:
         "complete_tmdb_ids": complete_ids,
         "seasons": seasons,
         "episodes": episodes,
+        "last_watched": last_watched,
     }
 
 

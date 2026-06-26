@@ -26,7 +26,7 @@ interface ShowDetail {
 }
 
 export default function Watching() {
-  const { partiallyWatchedIds, seasonProgress, isSeasonWatched, initSeasonTotals, showProgress, isDismissed } = useWatched();
+  const { partiallyWatchedIds, seasonProgress, isSeasonWatched, initSeasonTotals, showProgress, isDismissed, lastWatchedAt } = useWatched();
   const [shows, setShows] = useState<ShowDetail[]>([]);
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState<number | null>(null);
@@ -54,8 +54,11 @@ export default function Watching() {
   // Reset the visible window when the search changes
   useEffect(() => { setVisibleCount(40); }, [query]);
 
-  // Only show shows that still have unwatched episodes (progress = "partial")
-  const allInProgress = shows.filter(show => showProgress(show.id) === "partial" && !isDismissed(show.id));
+  // Only show shows that still have unwatched episodes (progress = "partial"),
+  // sorted by what you're actively watching — most recently watched first.
+  const allInProgress = shows
+    .filter(show => showProgress(show.id) === "partial" && !isDismissed(show.id))
+    .sort((a, b) => lastWatchedAt(b.id) - lastWatchedAt(a.id));
   const q = query.trim().toLowerCase();
   const inProgressShows = q
     ? allInProgress.filter(s => (s.title || "").toLowerCase().includes(q))
