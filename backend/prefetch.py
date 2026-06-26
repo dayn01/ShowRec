@@ -637,6 +637,28 @@ async def _cache_watched_shows(history: list[dict]):
         await _cache_show_seasons(tmdb_id, all_seasons=True)
 
 
+async def _refresh_watched_latest_seasons(history: list[dict]):
+    """Force-refresh each watched TV show's details + latest aired season so the
+    completeness check sees newly-aired episodes. This is what makes a show you'd
+    finished return to 'Watching' when a new episode drops, instead of waiting out
+    the cache TTL (the normal caching skips already-cached seasons)."""
+    today = __import__("datetime").date.today().isoformat()
+    tv_ids = list({h["tmdb_id"] for h in history if h.get("tmdb_id") and h.get("media_type") == "tv"})
+    if not tv_ids:
+        return
+    logger.info(f"Refreshing latest season for {len(tv_ids)} watched shows...")
+    for tmdb_id in tv_ids[:80]:
+        try:
+            show = await _fetch_and_cache_show(tmdb_id, "tv")          # force: picks up new seasons
+            seasons = show.get("seasons", []) if show else []
+            aired = [s for s in seasons if not s.get("air_date") or s["air_date"] <= today]
+            if aired:
+                await _fetch_and_cache_season(tmdb_id, aired[-1]["season_number"])  # force: new episodes
+            await asyncio.sleep(0.15)
+        except Exception:
+            pass
+
+
 async def _cache_recommended_shows(recs: dict | None, trending_shows: dict | None, trending_movies: dict | None):
     """Cache the latest season for recommended and trending TV shows."""
     tv_ids: set[int] = set()
@@ -786,6 +808,8 @@ async def refresh_profile(profile_id: int):
 
     # Cache watched shows' seasons (global cache)
     await _cache_watched_shows(history)
+    # Force-refresh latest seasons so finished shows return to Watching on new episodes
+    await _refresh_watched_latest_seasons(history)
 
     # AI picks (per profile)
     if settings.anthropic_api_key and settings.anthropic_api_key != "your_anthropic_api_key_here":
