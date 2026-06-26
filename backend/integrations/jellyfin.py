@@ -146,6 +146,48 @@ async def get_library_index() -> list[dict]:
     return out
 
 
+async def get_episode_availability(user_id: str | None = None) -> dict:
+    """For shows with at least one watched episode, the latest episode AVAILABLE in
+    the library: {tmdb_id: [season, episode]}. Lets the UI flag 'next episode ready
+    to watch'. Uses the library index for series→tmdb (no per-series calls)."""
+    user_id = user_id or settings.jellyfin_user_id
+    if not (settings.jellyfin_url and settings.jellyfin_api_key and user_id):
+        return {}
+
+    index = await get_library_index()
+    series_tmdb = {e["item_id"]: e["tmdb_id"] for e in index if e["media_type"] == "tv"}
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        r = await client.get(
+            f"{_base()}/Users/{user_id}/Items", headers=_headers(), params={
+                "IncludeItemTypes": "Episode", "Recursive": "true",
+                "Fields": "SeriesId,ParentIndexNumber,IndexNumber,UserData", "Limit": 10000,
+            })
+        if r.status_code != 200:
+            return {}
+        episodes = r.json().get("Items", [])
+
+    by_series: dict[str, dict] = {}
+    for e in episodes:
+        sid, s, ep = e.get("SeriesId"), e.get("ParentIndexNumber"), e.get("IndexNumber")
+        if not sid or s is None or ep is None:
+            continue
+        info = by_series.setdefault(sid, {"max": (0, 0), "any_played": False})
+        if (s, ep) > info["max"]:
+            info["max"] = (s, ep)
+        if (e.get("UserData") or {}).get("Played"):
+            info["any_played"] = True
+
+    out: dict[int, list] = {}
+    for sid, info in by_series.items():
+        if not info["any_played"]:
+            continue  # only shows you've started matter for "continue watching"
+        tid = series_tmdb.get(sid)
+        if tid:
+            out[tid] = list(info["max"])
+    return out
+
+
 async def get_resume_items() -> list[dict]:
     user_id = settings.jellyfin_user_id
     async with httpx.AsyncClient() as client:

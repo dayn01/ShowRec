@@ -26,12 +26,24 @@ interface ShowDetail {
 }
 
 export default function Watching() {
-  const { partiallyWatchedIds, seasonProgress, isSeasonWatched, initSeasonTotals, showProgress, isDismissed, lastWatchedAt } = useWatched();
+  const { partiallyWatchedIds, seasonProgress, isSeasonWatched, initSeasonTotals, showProgress, isDismissed, lastWatchedAt, isEpisodeWatched } = useWatched();
   const [shows, setShows] = useState<ShowDetail[]>([]);
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState<number | null>(null);
   const [query, setQuery] = useState("");
   const [visibleCount, setVisibleCount] = useState(40);
+  // Latest library-available episode per show (Jellyfin) → {id: [season, ep]}.
+  const [availMap, setAvailMap] = useState<Record<string, [number, number]>>({});
+
+  useEffect(() => {
+    api.getAvailableEpisodes().then(d => setAvailMap(d.items || {})).catch(() => {});
+  }, []);
+
+  // "Ready to continue" = the newest downloaded episode hasn't been watched yet.
+  const readyToContinue = (id: number) => {
+    const a = availMap[String(id)];
+    return a ? !isEpisodeWatched(id, a[0], a[1]) : false;
+  };
 
   useEffect(() => {
     if (partiallyWatchedIds.length === 0) { setShows([]); return; }
@@ -54,11 +66,16 @@ export default function Watching() {
   // Reset the visible window when the search changes
   useEffect(() => { setVisibleCount(40); }, [query]);
 
-  // Only show shows that still have unwatched episodes (progress = "partial"),
-  // sorted by what you're actively watching — most recently watched first.
+  // Only show shows that still have unwatched episodes (progress = "partial").
+  // Sort: a new episode ready on the server first, then most recently watched.
   const allInProgress = shows
     .filter(show => showProgress(show.id) === "partial" && !isDismissed(show.id))
-    .sort((a, b) => lastWatchedAt(b.id) - lastWatchedAt(a.id));
+    .sort((a, b) => {
+      const ra = readyToContinue(a.id) ? 1 : 0;
+      const rb = readyToContinue(b.id) ? 1 : 0;
+      if (ra !== rb) return rb - ra;                 // ready-to-continue on top
+      return lastWatchedAt(b.id) - lastWatchedAt(a.id);  // then by recency
+    });
   const q = query.trim().toLowerCase();
   const inProgressShows = q
     ? allInProgress.filter(s => (s.title || "").toLowerCase().includes(q))
@@ -170,7 +187,15 @@ export default function Watching() {
               <div style={{ flex: 1, padding: "14px 18px", display: "flex", flexDirection: "column", gap: 6, minWidth: 0 }}>
                 <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 700, fontSize: 15 }}>{show.title}</div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                      <span style={{ fontWeight: 700, fontSize: 15 }}>{show.title}</span>
+                      {readyToContinue(show.id) && (
+                        <span style={{
+                          background: "var(--green)", color: "#000", borderRadius: 10,
+                          padding: "1px 8px", fontSize: 10, fontWeight: 700,
+                        }}>▶ New episode</span>
+                      )}
+                    </div>
                     <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>
                       {show.networks?.join(", ")}
                       {show.status ? ` · ${show.status}` : ""}

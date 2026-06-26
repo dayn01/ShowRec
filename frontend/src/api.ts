@@ -247,6 +247,8 @@ export const api = {
     get<{ results: Recommendation[] }>(`/search?q=${encodeURIComponent(query)}&type=${type}`),
 
   getWatchedLibrary: () => get<{ items: Recommendation[] }>(`/watched/library`),
+  getAvailableEpisodes: () =>
+    get<{ items: Record<string, [number, number]> }>(`/watched/available`),
   getWatchlist: () => get<{ items: Recommendation[] }>(`/watchlist`),
   getWatchlistIds: () => get<{ tmdb_ids: number[] }>(`/watchlist/ids`),
   addWatchlist: (item: Recommendation) =>
