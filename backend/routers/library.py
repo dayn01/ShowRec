@@ -209,15 +209,30 @@ async def remove_from_watchlist(item: WatchlistItem, pid: int = Depends(get_prof
     return {"status": "removed"}
 
 
+# A season counts as "just released" for watchlist ordering/badging if it aired
+# within this many days (covers a binge drop and most of a weekly run).
+_NEW_SEASON_DAYS = 60
+
+
 @router.get("/watchlist")
 async def get_watchlist(pid: int = Depends(get_profile_id)):
+    from datetime import date, timedelta
     items = await database.get_watchlist(pid)
-    # The watchlist table doesn't store genres — enrich from the show cache so the
-    # genre filter on the Watchlist page has something to work with.
+    # The watchlist table doesn't store genres or air dates — enrich from the show
+    # cache so the genre filter works and we can surface a freshly-released season.
     cache = await database.get_shows_bulk([i["tmdb_id"] for i in items])
+    today = date.today().isoformat()
+    cutoff = (date.today() - timedelta(days=_NEW_SEASON_DAYS)).isoformat()
     for it in items:
         show = cache.get(it["tmdb_id"])
         it["genre_ids"] = show.get("genre_ids", []) if show else []
+        # TV: flag a season that aired recently so it ranks above plain recency and
+        # shows the existing "🆕 New season" card badge (driven by `new_season`).
+        if show and it["media_type"] == "tv":
+            sn, ad = database.latest_aired_season(show, today)
+            if sn and ad and ad >= cutoff:
+                it["new_season"] = True
+                it["reason"] = f"Season {sn} just released"
     return {"items": items}
 
 

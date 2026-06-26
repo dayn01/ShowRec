@@ -30,6 +30,18 @@ TTL = {
 }
 
 
+def latest_aired_season(show: dict, today: str) -> tuple[int | None, str | None]:
+    """(season_number, air_date) of the newest already-aired season (>=1) in a
+    cached show record, or (None, None). Shared by the watchlist 'new season'
+    ordering/badge and the new-season notifier."""
+    best_sn, best_ad = None, None
+    for s in (show.get("seasons") or []):
+        sn, ad = s.get("season_number"), s.get("air_date")
+        if sn and sn >= 1 and ad and ad <= today and (best_ad is None or ad > best_ad):
+            best_sn, best_ad = sn, ad
+    return best_sn, best_ad
+
+
 # ── Shared connection ─────────────────────────────────────────────────────────
 # One long-lived connection for the whole process instead of opening a fresh one
 # per call. SQLite is single-writer anyway; this removes per-call connect churn.

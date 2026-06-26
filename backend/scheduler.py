@@ -45,34 +45,68 @@ async def check_requests_ready():
 
 
 async def check_new_seasons():
-    """Notify (via Home Assistant) when a show you've finished gets a NEW season
-    announced/airing. Reuses the same detection as the For You 'returning' row,
-    and diffs against a stored baseline so each new season pings exactly once."""
+    """Notify (via Home Assistant) when a NEW season lands for a show you follow —
+    both shows you've finished (the For You 'returning' detection) and shows on your
+    watchlist. Diffs a stored baseline so each new season pings exactly once."""
     import database, prefetch
+    from datetime import date
     if not (settings.ha_url and settings.ha_token):
         return
 
     pid = 1  # notify for the default (owner) profile, like the episode check
+    today = date.today().isoformat()
+    current: dict[str, int] = {}            # tmdb_id -> season number
+    labels: dict[str, tuple[str, str]] = {}  # tmdb_id -> (title, reason)
+    wl_keys: set[str] = set()                # which entries came from the watchlist
+
+    # 1) Watched shows with a season beyond what you've seen (returning series).
     dismissed = set(await database.get_dismissed_ids(pid))
     try:
-        returning = await prefetch._returning_shows(pid, dismissed)
+        for r in await prefetch._returning_shows(pid, dismissed):
+            if not r.get("id"):
+                continue
+            k = str(r["id"])
+            current[k] = r.get("next_season")
+            labels[k] = (r["title"], r.get("reason", "new season"))
     except Exception as e:
-        logger.warning(f"New-season check failed: {e}")
+        logger.warning(f"New-season check (watched) failed: {e}")
+
+    # 2) Watchlist TV shows whose latest aired season has advanced.
+    try:
+        wl = await database.get_watchlist(pid)
+        cache = await database.get_shows_bulk([w["tmdb_id"] for w in wl if w.get("media_type") == "tv"])
+        for w in wl:
+            if w.get("media_type") != "tv":
+                continue
+            show = cache.get(w["tmdb_id"])
+            if not show:
+                continue
+            sn, _ = database.latest_aired_season(show, today)
+            k = str(w["tmdb_id"])
+            if sn and k not in current:     # a watched-returning entry takes precedence
+                current[k] = sn
+                labels[k] = (w.get("title") or show.get("title") or "A show", f"Season {sn} is out")
+                wl_keys.add(k)
+    except Exception as e:
+        logger.warning(f"New-season check (watchlist) failed: {e}")
+
+    if not current:
         return
 
-    # {tmdb_id: season_number} of shows currently flagged as having a new season.
-    current = {str(r["id"]): r.get("next_season") for r in returning if r.get("id")}
     prev = await database.cache_get("new_season_notify", "new_season_notify") or {}
-
-    # First run just records the baseline — don't blast every already-returning show.
+    # First run records the baseline only. Watchlist entries also notify only once
+    # we have a prior season for them, so we don't blast already-out seasons the
+    # first time a watchlist show is tracked.
     if prev:
-        newly = [r for r in returning
-                 if prev.get(str(r["id"])) != r.get("next_season")]
+        newly = [
+            k for k, v in current.items()
+            if (k in prev and prev[k] != v) or (k not in wl_keys and prev.get(k) != v)
+        ]
         if newly:
-            lines = [f"{r['title']} · {r.get('reason', 'new season')}" for r in newly[:10]]
+            lines = [f"{labels[k][0]} · {labels[k][1]}" for k in newly[:10]]
             count = len(newly)
             await homeassistant.send_notification(
-                title=f"📺 New season{'s' if count != 1 else ''} for {count} show{'s' if count != 1 else ''} you watch",
+                title=f"📺 New season{'s' if count != 1 else ''} for {count} show{'s' if count != 1 else ''} you follow",
                 message="\n".join(lines),
             )
             logger.info(f"Notified: {count} show(s) with a new season")

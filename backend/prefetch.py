@@ -661,6 +661,29 @@ async def _refresh_watched_latest_seasons(history: list[dict]):
             pass
 
 
+async def _refresh_watchlist_shows(profile_id: int):
+    """Force-refresh each watchlisted TV show's details so its seasons/air-dates and
+    next_episode_to_air are current — this is what lets a freshly-released season
+    surface (badge + ordering) and the new-season notifier fire for watchlist
+    titles, since watchlist shows aren't on the watched-refresh path."""
+    items = await database.get_watchlist(profile_id)
+    tv_ids = list({i["tmdb_id"] for i in items if i.get("media_type") == "tv" and i.get("tmdb_id")})
+    if not tv_ids:
+        return
+    logger.info(f"Refreshing details for {len(tv_ids)} watchlist shows...")
+    sem = asyncio.Semaphore(6)
+
+    async def refresh(tmdb_id):
+        async with sem:
+            try:
+                await _fetch_and_cache_show(tmdb_id, "tv")
+                await asyncio.sleep(0.15)
+            except Exception:
+                pass
+
+    await asyncio.gather(*[refresh(t) for t in tv_ids])
+
+
 async def _cache_recommended_shows(recs: dict | None, trending_shows: dict | None, trending_movies: dict | None):
     """Cache the latest season for recommended and trending TV shows."""
     tv_ids: set[int] = set()
@@ -812,6 +835,8 @@ async def refresh_profile(profile_id: int):
     await _cache_watched_shows(history)
     # Force-refresh latest seasons so finished shows return to Watching on new episodes
     await _refresh_watched_latest_seasons(history)
+    # Refresh watchlist shows so a newly-released season surfaces (badge + ordering)
+    await _refresh_watchlist_shows(profile_id)
 
     # AI picks (per profile)
     if settings.anthropic_api_key and settings.anthropic_api_key != "your_anthropic_api_key_here":

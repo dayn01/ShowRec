@@ -38,16 +38,17 @@ export default function Watchlist() {
   };
 
   // Reactively drop items removed from the watchlist or marked "not interested".
-  // Order by weight: available on Jellyfin/Plex → new episodes available → most
-  // recently added (the backend already returns newest-added first).
+  // Order by weight: on Jellyfin/Plex → newer episode of a show you're watching →
+  // a season released recently (TMDB) → most recently added (backend: newest first).
   const onList = items.filter(i => isWatchlisted(i.id) && !isDismissed(i.id));
-  const weight = (id: number, idx: number) =>
-    (isOwned(id) ? 1_000_000 : 0) +
-    (hasEpisodeAvailable(id) ? 10_000 : 0) +
-    (onList.length - idx);   // recency (earlier index = newer)
+  const weight = (item: Recommendation, idx: number) =>
+    (isOwned(item.id) ? 1_000_000 : 0) +
+    (hasEpisodeAvailable(item.id) ? 100_000 : 0) +
+    (item.new_season ? 10_000 : 0) +     // a season just dropped on TMDB
+    (onList.length - idx);               // recency (earlier index = newer)
   const ranked = onList
     .map((item, idx) => ({ item, idx }))
-    .sort((a, b) => weight(b.item.id, b.idx) - weight(a.item.id, a.idx))
+    .sort((a, b) => weight(b.item, b.idx) - weight(a.item, a.idx))
     .map(x => x.item);
   // "smart" = the weighted availability order; "added" keeps the backend's
   // newest-first order; the rest are generic sorts.
