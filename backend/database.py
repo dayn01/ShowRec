@@ -573,8 +573,9 @@ async def get_watch_state(profile_id: int) -> dict:
         ) as cur:
             rows = await cur.fetchall()
 
-        # tmdb_ids = FULLY-watched items (movies + explicit show-level marks).
-        tmdb_ids: set[int] = set()
+        # Movie marks, explicit show-level "Seen" marks, and per-episode rows.
+        movie_ids: set[int] = set()
+        show_marked: set[int] = set()
         episodes = []
         season_counts: dict[tuple[int, int], int] = {}
         watched_by_show: dict[int, set] = {}
@@ -583,8 +584,10 @@ async def get_watch_state(profile_id: int) -> dict:
         for media_type, tmdb_id, season, episode, watched_at in rows:
             if watched_at and watched_at > last_watched.get(tmdb_id, 0):
                 last_watched[tmdb_id] = watched_at
-            if media_type in ("movie", "show"):
-                tmdb_ids.add(tmdb_id)
+            if media_type == "movie":
+                movie_ids.add(tmdb_id)
+            elif media_type == "show":
+                show_marked.add(tmdb_id)
             elif media_type == "episode":
                 episodes.append({"tmdb_id": tmdb_id, "season": season, "episode": episode})
                 season_counts[(tmdb_id, season)] = season_counts.get((tmdb_id, season), 0) + 1
@@ -595,50 +598,57 @@ async def get_watch_state(profile_id: int) -> dict:
             for (tid, sn), cnt in season_counts.items()
         ]
 
-        # Bulk-load cached show + season data (same connection) to detect
-        # which shows are fully watched (all AIRED episodes seen).
-        check_ids = [t for t in watched_by_show if t not in tmdb_ids]
+        # Evaluate every show with episode data OR an explicit show-level mark, so a
+        # "finished" show can resurface in Watching when a new episode airs.
+        eval_ids = list(set(watched_by_show) | show_marked)
         shows_cache: dict[int, dict] = {}
         seasons_cache: dict[tuple[int, int], dict] = {}
-        if check_ids:
-            qmarks = ",".join("?" * len(check_ids))
-            async with db.execute(f"SELECT tmdb_id, data FROM shows WHERE tmdb_id IN ({qmarks})", check_ids) as cur:
+        if eval_ids:
+            qmarks = ",".join("?" * len(eval_ids))
+            async with db.execute(f"SELECT tmdb_id, data FROM shows WHERE tmdb_id IN ({qmarks})", eval_ids) as cur:
                 for tid, data in await cur.fetchall():
                     shows_cache[tid] = json.loads(data)
-            async with db.execute(f"SELECT tmdb_id, season_number, data FROM seasons WHERE tmdb_id IN ({qmarks})", check_ids) as cur:
+            async with db.execute(f"SELECT tmdb_id, season_number, data FROM seasons WHERE tmdb_id IN ({qmarks})", eval_ids) as cur:
                 for tid, sn, data in await cur.fetchall():
                     seasons_cache[(tid, sn)] = json.loads(data)
 
     today = time.strftime("%Y-%m-%d")
     complete_ids: list[int] = []
-    for tmdb_id in check_ids:
+    resurfaced: set[int] = set()   # show-marked titles with a NEW unwatched aired episode
+    for tmdb_id in eval_ids:
         show = shows_cache.get(tmdb_id)
         if not show or not show.get("seasons"):
             continue
-        watched_set = watched_by_show[tmdb_id]
-        all_aired_seen, saw_any_aired = True, False
+        watched_set = watched_by_show.get(tmdb_id, set())
+        saw_any_aired = False
+        unwatched_aired = False     # positive evidence of an aired-but-unwatched episode
+        cache_complete = True       # every season present in the cache
         for s in show["seasons"]:
             sn = s.get("season_number")
             if sn is None or sn < 1:
                 continue
             season_data = seasons_cache.get((tmdb_id, sn))
             if not season_data:
-                all_aired_seen = False  # unknown season — can't confirm
-                break
+                cache_complete = False
+                continue            # keep scanning other seasons for positive evidence
             for e in season_data.get("episodes", []):
                 ad = e.get("air_date")
                 if ad and ad <= today:
                     saw_any_aired = True
                     if (sn, e["episode_number"]) not in watched_set:
-                        all_aired_seen = False
-                        break
-            if not all_aired_seen:
-                break
-        if all_aired_seen and saw_any_aired:
+                        unwatched_aired = True
+        if tmdb_id in show_marked:
+            # Resurface only on positive evidence — a missing cache alone won't unmark it.
+            if unwatched_aired:
+                resurfaced.add(tmdb_id)
+        elif cache_complete and saw_any_aired and not unwatched_aired:
             complete_ids.append(tmdb_id)
 
+    # Full = movies + show-level marks that have NO new unwatched aired episode.
+    tmdb_ids = list(movie_ids | (show_marked - resurfaced))
+
     return {
-        "tmdb_ids": list(tmdb_ids),
+        "tmdb_ids": tmdb_ids,
         "complete_tmdb_ids": complete_ids,
         "seasons": seasons,
         "episodes": episodes,
