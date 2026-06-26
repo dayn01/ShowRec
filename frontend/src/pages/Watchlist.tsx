@@ -4,6 +4,15 @@ import { useWatched } from "../WatchedContext";
 import MediaCard from "../components/MediaCard";
 import DetailModal from "../components/DetailModal";
 import { GenreFilter, applyGenreFilter } from "../components/GenreFilter";
+import { SortControl, sortRecommendations } from "../components/SortControl";
+
+const SORTS = [
+  { id: "smart", label: "Smart (availability)" },
+  { id: "added", label: "Recently added" },
+  { id: "title", label: "Title A–Z" },
+  { id: "rating", label: "Rating" },
+  { id: "release", label: "Release year" },
+];
 
 export default function Watchlist() {
   const { isWatchlisted, isDismissed, isOwned, isEpisodeWatched } = useWatched();
@@ -11,6 +20,7 @@ export default function Watchlist() {
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<{ id: number; mediaType: string } | null>(null);
   const [genreFilter, setGenreFilter] = useState<string[]>([]);
+  const [sort, setSort] = useState("smart");
   const [availMap, setAvailMap] = useState<Record<string, [number, number]>>({});
 
   useEffect(() => {
@@ -39,7 +49,12 @@ export default function Watchlist() {
     .map((item, idx) => ({ item, idx }))
     .sort((a, b) => weight(b.item.id, b.idx) - weight(a.item.id, a.idx))
     .map(x => x.item);
-  const visible = applyGenreFilter(ranked, genreFilter);
+  // "smart" = the weighted availability order; "added" keeps the backend's
+  // newest-first order; the rest are generic sorts.
+  const ordered = sort === "smart" ? ranked
+    : sort === "added" ? onList
+    : sortRecommendations(onList, sort);
+  const visible = applyGenreFilter(ordered, genreFilter);
 
   if (loading) {
     return <div style={{ color: "var(--muted)", textAlign: "center", padding: 60 }}>Loading…</div>;
@@ -57,11 +72,16 @@ export default function Watchlist() {
 
   return (
     <div>
-      <p style={{ color: "var(--muted)", fontSize: 13, marginBottom: 16 }}>
-        {genreFilter.length > 0
-          ? `${visible.length} of ${onList.length} titles`
-          : `${onList.length} title${onList.length !== 1 ? "s" : ""} saved to watch`}
-      </p>
+      <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginBottom: 16 }}>
+        <p style={{ color: "var(--muted)", fontSize: 13, margin: 0 }}>
+          {genreFilter.length > 0
+            ? `${visible.length} of ${onList.length} titles`
+            : `${onList.length} title${onList.length !== 1 ? "s" : ""} saved to watch`}
+        </p>
+        <span style={{ marginLeft: "auto" }}>
+          <SortControl options={SORTS} value={sort} onChange={setSort} />
+        </span>
+      </div>
 
       <GenreFilter items={onList} selected={genreFilter} onChange={setGenreFilter} />
 

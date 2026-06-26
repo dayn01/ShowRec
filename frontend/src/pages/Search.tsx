@@ -2,12 +2,21 @@ import { useState, useEffect, useRef } from "react";
 import { api, Recommendation } from "../api";
 import MediaCard from "../components/MediaCard";
 import DetailModal from "../components/DetailModal";
+import { SortControl, sortRecommendations } from "../components/SortControl";
 
 type FilterType = "multi" | "tv" | "movie";
+
+const SORTS = [
+  { id: "relevance", label: "Relevance" },
+  { id: "rating", label: "Rating" },
+  { id: "release", label: "Release year" },
+  { id: "title", label: "Title A–Z" },
+];
 
 export default function Search() {
   const [query, setQuery] = useState("");
   const [type, setType] = useState<FilterType>("multi");
+  const [sort, setSort] = useState("relevance");
   const [results, setResults] = useState<Recommendation[]>([]);
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
@@ -61,6 +70,8 @@ export default function Search() {
   }, [query, type]);
 
   const similarTitle = similarFor?.title || similarFor?.name || "";
+  const sortedResults = sortRecommendations(results, sort);
+  const sortedSimilar = sortRecommendations(similarItems, sort);
 
   return (
     <div>
@@ -82,8 +93,8 @@ export default function Search() {
         />
       </div>
 
-      {/* Type filter */}
-      <div style={{ display: "flex", gap: 6, marginBottom: 24 }}>
+      {/* Type filter + sort */}
+      <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 24 }}>
         {([["multi", "All"], ["tv", "TV Shows"], ["movie", "Films"]] as const).map(([id, label]) => (
           <button key={id} onClick={() => setType(id)} style={{
             padding: "5px 14px", borderRadius: 20, fontSize: 12,
@@ -93,6 +104,11 @@ export default function Search() {
             fontWeight: type === id ? 600 : 400, cursor: "pointer", transition: "all 0.15s",
           }}>{label}</button>
         ))}
+        {(results.length > 0 || similarItems.length > 0) && (
+          <span style={{ marginLeft: "auto" }}>
+            <SortControl options={SORTS} value={sort} onChange={setSort} />
+          </span>
+        )}
       </div>
 
       {/* ── Similar-to view ── */}
@@ -118,7 +134,7 @@ export default function Search() {
           )}
 
           <div className="media-grid">
-            {similarItems.map(item => (
+            {sortedSimilar.map(item => (
               <MediaCard key={`${item.media_type}-${item.id}`} item={item}
                 onClick={() => setSelected({ id: item.id, mediaType: item.media_type })}
                 onSimilar={() => showSimilar(item)} />
@@ -146,7 +162,7 @@ export default function Search() {
           )}
 
           <div className="media-grid">
-            {results.map(item => (
+            {sortedResults.map(item => (
               <MediaCard key={`${item.media_type}-${item.id}`} item={item}
                 onClick={() => setSelected({ id: item.id, mediaType: item.media_type })}
                 onSimilar={() => showSimilar(item)} />

@@ -3,8 +3,16 @@ import { api, Recommendation } from "../api";
 import { useWatched } from "../WatchedContext";
 import MediaCard from "../components/MediaCard";
 import DetailModal from "../components/DetailModal";
+import { SortControl, sortRecommendations } from "../components/SortControl";
 
 type SubTab = "tv" | "movie";
+
+const SORTS = [
+  { id: "recent", label: "Recently watched" },
+  { id: "title", label: "Title A–Z" },
+  { id: "rating", label: "Rating" },
+  { id: "release", label: "Release year" },
+];
 
 export default function Watched() {
   const { isWatched, showProgress } = useWatched();
@@ -12,6 +20,7 @@ export default function Watched() {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<SubTab>("tv");
   const [query, setQuery] = useState("");
+  const [sort, setSort] = useState("recent");
   const [selected, setSelected] = useState<{ id: number; mediaType: string } | null>(null);
   const [visibleCount, setVisibleCount] = useState(40);
 
@@ -22,18 +31,19 @@ export default function Watched() {
       .finally(() => setLoading(false));
   }, []);
 
-  // Reset the visible window when the tab or search changes
-  useEffect(() => { setVisibleCount(40); }, [tab, query]);
+  // Reset the visible window when the tab, search or sort changes
+  useEffect(() => { setVisibleCount(40); }, [tab, query, sort]);
 
   // Reactively drop items that get unmarked while viewing
   const stillWatched = (i: Recommendation) =>
     i.media_type === "tv" ? showProgress(i.id) === "full" : isWatched(i.id);
 
   const q = query.trim().toLowerCase();
-  const visible = items
+  const filtered = items
     .filter(i => i.media_type === tab)
     .filter(stillWatched)
     .filter(i => !q || (i.title || i.name || "").toLowerCase().includes(q));
+  const visible = sortRecommendations(filtered, sort);
   const shown = visible.slice(0, visibleCount);
 
   const tvCount = items.filter(i => i.media_type === "tv" && stillWatched(i)).length;
@@ -54,8 +64,9 @@ export default function Watched() {
         ))}
       </div>
 
-      {/* Search */}
-      <div style={{ position: "relative", marginBottom: 20, maxWidth: 420 }}>
+      {/* Search + sort */}
+      <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginBottom: 20 }}>
+        <div style={{ position: "relative", flex: 1, minWidth: 220, maxWidth: 420 }}>
         <span style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", color: "var(--muted)", fontSize: 14 }}>🔍</span>
         <input
           value={query}
@@ -75,6 +86,8 @@ export default function Watched() {
             background: "none", border: "none", color: "var(--muted)", cursor: "pointer", fontSize: 14,
           }}>✕</button>
         )}
+        </div>
+        <SortControl options={SORTS} value={sort} onChange={setSort} />
       </div>
 
       {loading && (
