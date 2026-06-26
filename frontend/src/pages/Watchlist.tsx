@@ -6,22 +6,40 @@ import DetailModal from "../components/DetailModal";
 import { GenreFilter, applyGenreFilter } from "../components/GenreFilter";
 
 export default function Watchlist() {
-  const { isWatchlisted, isDismissed } = useWatched();
+  const { isWatchlisted, isDismissed, isOwned, isEpisodeWatched } = useWatched();
   const [items, setItems] = useState<Recommendation[]>([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<{ id: number; mediaType: string } | null>(null);
   const [genreFilter, setGenreFilter] = useState<string[]>([]);
+  const [availMap, setAvailMap] = useState<Record<string, [number, number]>>({});
 
   useEffect(() => {
     api.getWatchlist()
       .then(d => setItems(d.items))
       .catch(() => setItems([]))
       .finally(() => setLoading(false));
+    api.getAvailableEpisodes().then(d => setAvailMap(d.items || {})).catch(() => {});
   }, []);
 
-  // Reactively drop items removed from the watchlist or marked "not interested"
+  // A TV show with a newer downloaded episode you haven't watched.
+  const hasEpisodeAvailable = (id: number) => {
+    const a = availMap[String(id)];
+    return a ? !isEpisodeWatched(id, a[0], a[1]) : false;
+  };
+
+  // Reactively drop items removed from the watchlist or marked "not interested".
+  // Order by weight: available on Jellyfin/Plex → new episodes available → most
+  // recently added (the backend already returns newest-added first).
   const onList = items.filter(i => isWatchlisted(i.id) && !isDismissed(i.id));
-  const visible = applyGenreFilter(onList, genreFilter);
+  const weight = (id: number, idx: number) =>
+    (isOwned(id) ? 1_000_000 : 0) +
+    (hasEpisodeAvailable(id) ? 10_000 : 0) +
+    (onList.length - idx);   // recency (earlier index = newer)
+  const ranked = onList
+    .map((item, idx) => ({ item, idx }))
+    .sort((a, b) => weight(b.item.id, b.idx) - weight(a.item.id, a.idx))
+    .map(x => x.item);
+  const visible = applyGenreFilter(ranked, genreFilter);
 
   if (loading) {
     return <div style={{ color: "var(--muted)", textAlign: "center", padding: 60 }}>Loading…</div>;
