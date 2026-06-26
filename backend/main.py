@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from contextlib import asynccontextmanager
 from pathlib import Path
-from routers import recommendations, upcoming, status, details, watched, ai_recommendations, library, profiles, requests, setup
+from routers import recommendations, upcoming, status, details, watched, ai_recommendations, library, profiles, requests, setup, stats
 import scheduler
 import prefetch
 import database
@@ -45,7 +45,7 @@ app.add_middleware(
 )
 
 _routers = (recommendations, upcoming, status, details, watched,
-            ai_recommendations, library, profiles, requests, setup)
+            ai_recommendations, library, profiles, requests, setup, stats)
 
 # Root paths (e.g. /watched) — used by the Vite dev server and the Docker nginx,
 # both of which strip the /api prefix before forwarding here.
