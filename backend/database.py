@@ -637,11 +637,14 @@ async def get_watch_state(profile_id: int) -> dict:
                     saw_any_aired = True
                     if (sn, e["episode_number"]) not in watched_set:
                         unwatched_aired = True
+        # A scheduled upcoming episode (returning series) also counts as "new
+        # episode coming" — so a caught-up show you've watched stays in Watching.
+        has_upcoming = bool(show.get("next_episode_to_air"))
         if tmdb_id in show_marked:
-            # Resurface only on positive evidence — a missing cache alone won't unmark it.
-            if unwatched_aired:
+            # Resurface on positive evidence — a missing cache alone won't unmark it.
+            if unwatched_aired or has_upcoming:
                 resurfaced.add(tmdb_id)
-        elif cache_complete and saw_any_aired and not unwatched_aired:
+        elif cache_complete and saw_any_aired and not unwatched_aired and not has_upcoming:
             complete_ids.append(tmdb_id)
 
     # Full = movies + show-level marks that have NO new unwatched aired episode.
