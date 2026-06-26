@@ -89,10 +89,10 @@ async def check_upcoming_episodes():
 def start():
     scheduler.add_job(check_upcoming_episodes, "cron", hour=8, minute=0, id="daily_episodes")
     scheduler.add_job(_full_refresh, "interval", hours=6, id="full_refresh")
-    scheduler.add_job(_light_sync, "interval", hours=1, id="light_sync")
+    scheduler.add_job(_light_sync, "interval", minutes=15, id="light_sync")
     scheduler.add_job(check_requests_ready, "interval", minutes=30, id="requests_ready")
     scheduler.start()
-    logger.info("Scheduler started — episode check 08:00, light sync hourly, full refresh 6h, request-ready 30m")
+    logger.info("Scheduler started — episode check 08:00, light sync 15m, full refresh 6h, request-ready 30m")
 
 
 def _full_refresh():

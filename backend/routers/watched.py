@@ -197,6 +197,21 @@ async def get_watched_history(pid: int = Depends(get_profile_id)):
     return state
 
 
+@router.post("/sync")
+async def sync_now(pid: int = Depends(get_profile_id)):
+    """Pull this profile's watched state from its linked Jellyfin/Plex/Trakt right
+    now (no recommendation rebuild) and return the fresh state. Used by the UI to
+    stay current without waiting for the scheduled sync."""
+    import prefetch
+    profile = await database.get_profile(pid)
+    if profile:
+        try:
+            await prefetch.sync_watch_state(profile)
+        except Exception:
+            pass
+    return await database.get_watch_state(pid)
+
+
 @router.get("/sources")
 async def get_watch_sources(pid: int = Depends(get_profile_id)):
     return await database.get_watch_state_stats(pid)

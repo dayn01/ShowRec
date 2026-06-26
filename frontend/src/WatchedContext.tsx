@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from "react";
+import { createContext, useContext, useState, useEffect, useCallback, useRef, ReactNode } from "react";
 import { getProfileId } from "./api";
 
 const pidHeaders = () => ({ "Content-Type": "application/json", "X-Profile-Id": String(getProfileId()) });
@@ -127,39 +127,60 @@ export function WatchedProvider({ children }: { children: ReactNode }) {
       .catch(() => {});
   }, []);
 
-  // Load from backend. The DB is the source of truth, so we REPLACE the local
-  // watch sets with what it returns rather than merging — otherwise a wiped /
-  // re-synced (or switched) account leaves the previous account's watched items
-  // in this browser's localStorage and they keep showing in "Watching". Only
-  // replace on a successful response (don't wipe on a transient network error).
-  useEffect(() => {
-    fetch("/api/watched/history", { headers: pidHeaders() })
-      .then(r => r.ok ? r.json() : null)
-      .then(data => {
-        if (!data) return;
+  // Apply a watch-state payload. The DB is the source of truth, so we REPLACE the
+  // local watch sets rather than merging — otherwise a wiped / re-synced (or
+  // switched) account leaves the previous account's items in localStorage and they
+  // keep showing in "Watching". Only called on a successful response.
+  const applyWatchState = useCallback((data: any) => {
+    if (!data) return;
+    const fullIds = [...(data.tmdb_ids ?? []), ...(data.complete_tmdb_ids ?? [])];
+    setWatchedShows(new Set(fullIds.map(String)));
 
-        // Fully-watched items: explicit marks + shows the backend detected as complete
-        const fullIds = [...(data.tmdb_ids ?? []), ...(data.complete_tmdb_ids ?? [])];
-        setWatchedShows(new Set(fullIds.map(String)));
+    const eps = new Set<string>();
+    (data.episodes ?? []).forEach((e: any) => eps.add(epKey(e.tmdb_id, e.season, e.episode)));
+    setWatchedEpisodes(eps);
 
-        const eps = new Set<string>();
-        (data.episodes ?? []).forEach((e: any) => eps.add(epKey(e.tmdb_id, e.season, e.episode)));
-        setWatchedEpisodes(eps);
-
-        // Rebuild season watched counts from the backend, keeping any TMDB totals
-        // we already know (so season sizes survive; watched counts reset cleanly).
-        setProgressMap(prev => {
-          const m = new Map<string, SeasonProgress>();
-          for (const [k, v] of prev) if (v.total > 0) m.set(k, { watched: 0, total: v.total });
-          (data.seasons ?? []).forEach((s: any) => {
-            const k = sKey(s.tmdb_id, s.season);
-            m.set(k, { watched: s.episodes_watched, total: m.get(k)?.total ?? 0 });
-          });
-          return m;
-        });
-      })
-      .catch(() => {});
+    setProgressMap(prev => {
+      const m = new Map<string, SeasonProgress>();
+      for (const [k, v] of prev) if (v.total > 0) m.set(k, { watched: 0, total: v.total });
+      (data.seasons ?? []).forEach((s: any) => {
+        const k = sKey(s.tmdb_id, s.season);
+        m.set(k, { watched: s.episodes_watched, total: m.get(k)?.total ?? 0 });
+      });
+      return m;
+    });
   }, []);
+
+  // Fast read of the stored state.
+  const loadHistory = useCallback(() => {
+    fetch("/api/watched/history", { headers: pidHeaders() })
+      .then(r => r.ok ? r.json() : null).then(applyWatchState).catch(() => {});
+  }, [applyWatchState]);
+
+  // Pull fresh from Jellyfin/Plex/Trakt, then apply. Debounced via lastSyncRef.
+  const lastSyncRef = useRef(0);
+  const syncNow = useCallback(() => {
+    lastSyncRef.current = Date.now();
+    fetch("/api/watched/sync", { method: "POST", headers: pidHeaders() })
+      .then(r => r.ok ? r.json() : null).then(applyWatchState).catch(() => {});
+  }, [applyWatchState]);
+
+  useEffect(() => {
+    loadHistory();   // instant paint from the DB
+    syncNow();       // and check Jellyfin/Plex/Trakt right away
+    // Re-check Jellyfin when the user returns to the app (debounced to ≤1/min),
+    // and refresh the stored view every few minutes for a left-open tab.
+    const onFocus = () => { if (Date.now() - lastSyncRef.current > 60_000) syncNow(); };
+    const onVis = () => { if (!document.hidden) onFocus(); };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVis);
+    const id = window.setInterval(loadHistory, 5 * 60_000);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVis);
+      window.clearInterval(id);
+    };
+  }, [loadHistory, syncNow]);
 
   // ── Shows ──────────────────────────────────────────────────────────────────
   const isWatched = useCallback((id: number) => watchedShows.has(String(id)), [watchedShows]);
