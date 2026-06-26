@@ -64,22 +64,41 @@ export default function Watching() {
     } catch { /* leave the row as-is so the user can retry */ }
   }
 
-  // "Ready to continue" = the newest downloaded episode hasn't been watched yet.
+  // "Ready to continue" = the newest downloaded episode (on your server) hasn't
+  // been watched yet.
   const readyToContinue = (id: number) => {
     const a = availMap[String(id)];
     return a ? !isEpisodeWatched(id, a[0], a[1]) : false;
   };
 
-  // Candidate shows = mid-watching shows PLUS any show (even one you'd "finished")
-  // whose newest downloaded episode is unwatched — so a new episode resurfaces it.
+  // "Recently released" = the next unwatched aired episode (from TMDB, via next-up)
+  // aired within the window — so a brand-new season surfaces even when it isn't on
+  // your Jellyfin/Plex server yet.
+  const RECENT_NEW_DAYS = 60;
+  const recentNew = (id: number) => {
+    const nu = nextUp[String(id)];
+    if (!nu?.air_date) return false;
+    const days = (Date.now() - new Date(nu.air_date + "T00:00:00").getTime()) / 86400000;
+    return days >= 0 && days <= RECENT_NEW_DAYS;
+  };
+
+  // Candidate shows = mid-watching shows, PLUS any show (even one you'd "finished")
+  // whose newest downloaded episode is unwatched (server) OR whose next episode just
+  // aired (TMDB) — so a new season resurfaces it whether or not it's on your server.
   const candidateIds = useMemo(() => {
     const ids = new Set<number>(partiallyWatchedIds);
     for (const [id, a] of Object.entries(availMap)) {
       const tid = Number(id);
       if (a && !isEpisodeWatched(tid, a[0], a[1])) ids.add(tid);
     }
+    const now = Date.now();
+    for (const [id, nu] of Object.entries(nextUp)) {
+      if (!nu?.air_date) continue;
+      const days = (now - new Date(nu.air_date + "T00:00:00").getTime()) / 86400000;
+      if (days >= 0 && days <= RECENT_NEW_DAYS) ids.add(Number(id));
+    }
     return [...ids].filter(id => !isStopped(id));   // shows you've stopped drop off
-  }, [partiallyWatchedIds.join(","), availMap, isEpisodeWatched, isStopped]);
+  }, [partiallyWatchedIds.join(","), availMap, nextUp, isEpisodeWatched, isStopped]);
 
   useEffect(() => {
     if (candidateIds.length === 0) { setShows([]); return; }
@@ -106,13 +125,14 @@ export default function Watching() {
   // watch (even if you'd previously finished everything that had aired).
   // Sort: a new episode ready on the server first, then most recently watched.
   const allInProgress = shows
-    .filter(show => !isDismissed(show.id) && !isStopped(show.id) && (showProgress(show.id) === "partial" || readyToContinue(show.id)))
+    .filter(show => !isDismissed(show.id) && !isStopped(show.id)
+      && (showProgress(show.id) === "partial" || readyToContinue(show.id) || recentNew(show.id)))
     .sort((a, b) => {
       if (sort === "title") return (a.title || "").localeCompare(b.title || "");
       if (sort === "recent") return lastWatchedAt(b.id) - lastWatchedAt(a.id);
-      // default: a new episode ready on the server first, then most recently watched
-      const ra = readyToContinue(a.id) ? 1 : 0;
-      const rb = readyToContinue(b.id) ? 1 : 0;
+      // default: a new episode (on your server OR just released) first, then recency
+      const ra = (readyToContinue(a.id) || recentNew(a.id)) ? 1 : 0;
+      const rb = (readyToContinue(b.id) || recentNew(b.id)) ? 1 : 0;
       if (ra !== rb) return rb - ra;
       return lastWatchedAt(b.id) - lastWatchedAt(a.id);
     });
@@ -236,12 +256,24 @@ export default function Watching() {
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                       <span style={{ fontWeight: 700, fontSize: 15 }}>{show.title}</span>
-                      {readyToContinue(show.id) && (
-                        <span style={{
-                          background: "var(--green)", color: "#000", borderRadius: 10,
-                          padding: "1px 8px", fontSize: 10, fontWeight: 700,
-                        }}>▶ New episode</span>
-                      )}
+                      {(() => {
+                        const nu = nextUp[String(show.id)];
+                        // A season premiere you haven't started (E1, recently aired).
+                        if (recentNew(show.id) && nu?.episode === 1) {
+                          return <span style={{
+                            background: "var(--accent2)", color: "#000", borderRadius: 10,
+                            padding: "1px 8px", fontSize: 10, fontWeight: 700,
+                          }}>🆕 New season</span>;
+                        }
+                        // A new episode — already on your server, or just aired (TMDB).
+                        if (readyToContinue(show.id) || recentNew(show.id)) {
+                          return <span style={{
+                            background: "var(--green)", color: "#000", borderRadius: 10,
+                            padding: "1px 8px", fontSize: 10, fontWeight: 700,
+                          }}>▶ New episode</span>;
+                        }
+                        return null;
+                      })()}
                     </div>
                     <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>
                       {show.networks?.join(", ")}
