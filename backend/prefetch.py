@@ -144,6 +144,8 @@ async def _returning_shows(profile_id: int, dismissed: set[int]) -> list[dict]:
             "base_score": 9999,                  # survive genre re-weighting on read
             "genre_component": 0,
             "new_season": True,
+            "next_season": next_season,          # structured, for the new-season notifier
+            "premieres": next_ep["air_date"],
             "reason": f"New season {next_season} — premieres {next_ep['air_date']}",
         })
     return out

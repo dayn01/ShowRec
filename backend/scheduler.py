@@ -44,6 +44,42 @@ async def check_requests_ready():
     await database.cache_set("request_state", current_s)
 
 
+async def check_new_seasons():
+    """Notify (via Home Assistant) when a show you've finished gets a NEW season
+    announced/airing. Reuses the same detection as the For You 'returning' row,
+    and diffs against a stored baseline so each new season pings exactly once."""
+    import database, prefetch
+    if not (settings.ha_url and settings.ha_token):
+        return
+
+    pid = 1  # notify for the default (owner) profile, like the episode check
+    dismissed = set(await database.get_dismissed_ids(pid))
+    try:
+        returning = await prefetch._returning_shows(pid, dismissed)
+    except Exception as e:
+        logger.warning(f"New-season check failed: {e}")
+        return
+
+    # {tmdb_id: season_number} of shows currently flagged as having a new season.
+    current = {str(r["id"]): r.get("next_season") for r in returning if r.get("id")}
+    prev = await database.cache_get("new_season_notify", "new_season_notify") or {}
+
+    # First run just records the baseline — don't blast every already-returning show.
+    if prev:
+        newly = [r for r in returning
+                 if prev.get(str(r["id"])) != r.get("next_season")]
+        if newly:
+            lines = [f"{r['title']} · {r.get('reason', 'new season')}" for r in newly[:10]]
+            count = len(newly)
+            await homeassistant.send_notification(
+                title=f"📺 New season{'s' if count != 1 else ''} for {count} show{'s' if count != 1 else ''} you watch",
+                message="\n".join(lines),
+            )
+            logger.info(f"Notified: {count} show(s) with a new season")
+
+    await database.cache_set("new_season_notify", current)
+
+
 async def check_upcoming_episodes():
     logger.info("Checking upcoming episodes...")
     import database
@@ -94,8 +130,9 @@ def start():
     # instead of each spinning up a separate loop in a worker thread.
     import prefetch
     scheduler.add_job(check_upcoming_episodes, "cron", hour=8, minute=0, id="daily_episodes")
+    scheduler.add_job(check_new_seasons, "cron", hour=9, minute=0, id="new_seasons")
     scheduler.add_job(prefetch.refresh_all, "interval", hours=6, id="full_refresh")
     scheduler.add_job(prefetch.sync_all_watch_states, "interval", minutes=15, id="light_sync")
     scheduler.add_job(check_requests_ready, "interval", minutes=30, id="requests_ready")
     scheduler.start()
-    logger.info("Scheduler started — episode check 08:00, light sync 15m, full refresh 6h, request-ready 30m")
+    logger.info("Scheduler started — episode check 08:00, new-season check 09:00, light sync 15m, full refresh 6h, request-ready 30m")

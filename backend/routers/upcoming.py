@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Query, Depends
 from integrations import trakt, homeassistant
-from scheduler import check_upcoming_episodes
+from scheduler import check_upcoming_episodes, check_new_seasons
 from deps import get_profile_id, pkey
 from datetime import date, timedelta
 import database
@@ -105,3 +105,11 @@ async def trigger_notification():
 async def test_notify():
     """Send a test HA notification immediately (bypasses the airing-today check)."""
     return await homeassistant.send_test()
+
+
+@router.post("/check-new-seasons")
+async def trigger_new_season_check():
+    """Run the 'new season for a show you watch' check now (also runs daily at 09:00).
+    First call records a baseline; later calls notify on newly-announced seasons."""
+    await check_new_seasons()
+    return {"status": "checked — notifies on newly-detected seasons"}
