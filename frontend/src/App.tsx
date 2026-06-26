@@ -15,8 +15,8 @@ import { useIsMobile } from "./useIsMobile";
 const NAV = [
   { to: "/", label: "Recommendations", end: true },
   { to: "/watching", label: "Watching" },
-  { to: "/watched", label: "Watched" },
   { to: "/watchlist", label: "Watchlist" },
+  { to: "/watched", label: "Watched" },
   { to: "/upcoming", label: "Upcoming" },
   { to: "/stats", label: "Stats" },
   { to: "/search", label: "🔍 Search" },
