@@ -208,8 +208,9 @@ export default function SeasonRow({ season, tmdbId, showTitle, autoExpand = fals
       await api.cancelRequest(tmdbId, "tv", [season.season_number]);
       setReqState("idle");
       // Refetch the per-show status so this (and any seasons cancelled alongside it)
-      // flip back to requestable.
+      // flip back to requestable; refresh the bulk map too so card badges update.
       queryClient.invalidateQueries({ queryKey: ["request-status", "tv", tmdbId] });
+      queryClient.invalidateQueries({ queryKey: ["request-statuses"] });
     } catch {
       // leave the request button as-is; user can retry
     } finally {

@@ -73,9 +73,11 @@ async def check_upcoming_episodes():
         show = entry.get("show", {}).get("title", "Unknown")
         ep = entry.get("episode", {})
         ep_title = ep.get("title", "")
-        s = ep.get("season", "?")
-        e = ep.get("number", "?")
-        lines.append(f"{show} S{s:02d}E{e:02d} — {ep_title}")
+        s = ep.get("season")
+        e = ep.get("number")
+        # Only format S/E when both are ints — a missing number would crash :02d.
+        se = f" S{s:02d}E{e:02d}" if isinstance(s, int) and isinstance(e, int) else ""
+        lines.append(f"{show}{se} — {ep_title}")
 
     message = "\n".join(lines)
     count = len(today_entries)
@@ -87,21 +89,13 @@ async def check_upcoming_episodes():
 
 
 def start():
+    # All jobs are coroutines, so AsyncIOScheduler runs them on the app's event
+    # loop — the same loop the API uses, so they share the one SQLite connection
+    # instead of each spinning up a separate loop in a worker thread.
+    import prefetch
     scheduler.add_job(check_upcoming_episodes, "cron", hour=8, minute=0, id="daily_episodes")
-    scheduler.add_job(_full_refresh, "interval", hours=6, id="full_refresh")
-    scheduler.add_job(_light_sync, "interval", minutes=15, id="light_sync")
+    scheduler.add_job(prefetch.refresh_all, "interval", hours=6, id="full_refresh")
+    scheduler.add_job(prefetch.sync_all_watch_states, "interval", minutes=15, id="light_sync")
     scheduler.add_job(check_requests_ready, "interval", minutes=30, id="requests_ready")
     scheduler.start()
     logger.info("Scheduler started — episode check 08:00, light sync 15m, full refresh 6h, request-ready 30m")
-
-
-def _full_refresh():
-    import asyncio
-    import prefetch
-    asyncio.run(prefetch.refresh_all())
-
-
-def _light_sync():
-    import asyncio
-    import prefetch
-    asyncio.run(prefetch.sync_all_watch_states())

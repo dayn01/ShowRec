@@ -156,6 +156,7 @@ export default function DetailModal({ tmdbId, mediaType, onClose }: Props) {
       await api.cancelRequest(data.id, data.media_type);
       setReqState("idle");
       queryClient.invalidateQueries({ queryKey: ["request-status", current.mediaType, current.tmdbId] });
+      queryClient.invalidateQueries({ queryKey: ["request-statuses"] });
     } catch {
       setReqState("error");
       setTimeout(() => setReqState("idle"), 3000);
