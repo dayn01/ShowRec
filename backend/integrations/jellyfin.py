@@ -228,3 +228,43 @@ async def ping() -> bool:
             return r.status_code == 200
     except Exception:
         return False
+
+
+async def user_exists(user_id: str | None) -> bool | None:
+    """True/False if we could check whether the user id is valid; None if we
+    couldn't tell (server unreachable, missing config, or an ambiguous status)."""
+    if not (settings.jellyfin_url and settings.jellyfin_api_key and user_id):
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(f"{_base()}/Users/{user_id}", headers=_headers())
+        if r.status_code == 200:
+            return True
+        if r.status_code in (400, 404):   # Jellyfin returns these for an unknown id
+            return False
+        return None                       # 401/5xx — can't be sure
+    except Exception:
+        return None
+
+
+async def resolve_user_id(username: str | None = None) -> str | None:
+    """Current Jellyfin user id for the configured (stable) username, or None."""
+    username = (username or settings.jellyfin_username or "").strip()
+    if not username:
+        return None
+    users = await list_users(settings.jellyfin_url, settings.jellyfin_api_key)
+    for u in (users or []):
+        if (u.get("name") or "").strip().lower() == username.lower():
+            return u.get("id")
+    return None
+
+
+async def ping_user() -> bool:
+    """Health for the status dot: the server is reachable AND the configured user
+    id is valid. A stale user id (e.g. Jellyfin reinstalled) shows red instead of a
+    misleading green, so a broken sync is actually visible."""
+    if not await ping():
+        return False
+    if not settings.jellyfin_user_id:
+        return True                       # server up, no user linked yet
+    return await user_exists(settings.jellyfin_user_id) is not False

@@ -22,6 +22,7 @@ ALLOWED_KEYS: dict[str, str] = {
     "JELLYFIN_URL": "jellyfin_url",
     "JELLYFIN_API_KEY": "jellyfin_api_key",
     "JELLYFIN_USER_ID": "jellyfin_user_id",
+    "JELLYFIN_USERNAME": "jellyfin_username",
     "PLEX_URL": "plex_url",
     "PLEX_TOKEN": "plex_token",
     "OVERSEERR_URL": "overseerr_url",

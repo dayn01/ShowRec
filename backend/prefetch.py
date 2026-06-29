@@ -704,6 +704,37 @@ async def _cache_recommended_shows(recs: dict | None, trending_shows: dict | Non
             await _cache_show_seasons(tmdb_id, all_seasons=False)
 
 
+async def _heal_jellyfin_user(profile: dict) -> str | None:
+    """Return a working Jellyfin user id for this profile, repairing a stale one.
+
+    Jellyfin user ids are volatile (they change on reinstall/migration). If the
+    stored id is gone and a JELLYFIN_USERNAME is configured (which maps to the
+    default profile), re-resolve the current id from the username and persist it —
+    so an id change self-heals instead of silently breaking sync. Fails safe: if we
+    can't verify (server down) or can't recover, the original id is returned
+    unchanged (callers keep existing watch data rather than wiping)."""
+    jf_user = profile.get("jellyfin_user_id")
+    if not (settings.jellyfin_url and settings.jellyfin_api_key):
+        return jf_user
+
+    exists = await jellyfin.user_exists(jf_user) if jf_user else False
+    if exists is not False:
+        return jf_user   # valid, or unverifiable — don't touch it
+
+    # The id is gone. The default profile maps to the .env JELLYFIN_USERNAME.
+    if profile["id"] == 1 and settings.jellyfin_username:
+        new_id = await jellyfin.resolve_user_id()
+        if new_id and new_id != jf_user:
+            await database.update_profile(1, jellyfin_user_id=new_id)
+            settings.jellyfin_user_id = new_id   # heal owned/availability calls too
+            logger.warning(
+                f"Jellyfin user id changed; healed {jf_user!r} -> {new_id!r} "
+                f"via username {settings.jellyfin_username!r}"
+            )
+            return new_id
+    return jf_user
+
+
 async def sync_watch_state(profile: dict):
     """
     Seed a profile's watch_state from its linked accounts.
@@ -712,7 +743,7 @@ async def sync_watch_state(profile: dict):
     Additive only (INSERT OR IGNORE) so user marks/unmarks are preserved.
     """
     pid = profile["id"]
-    jf_user = profile.get("jellyfin_user_id")
+    jf_user = await _heal_jellyfin_user(profile)   # repair a stale id from the username
     is_default = pid == 1
     rows: list[tuple] = []
 

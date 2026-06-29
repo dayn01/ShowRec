@@ -14,6 +14,10 @@ class Settings(BaseSettings):
     jellyfin_url: Optional[str] = None
     jellyfin_api_key: Optional[str] = None
     jellyfin_user_id: Optional[str] = None
+    # Optional: the stable Jellyfin username. The user id is volatile (it changes
+    # if Jellyfin is reinstalled/migrated); with a username set, the app re-resolves
+    # and repairs a stale user id automatically instead of silently breaking.
+    jellyfin_username: Optional[str] = None
 
     plex_url: Optional[str] = None
     plex_token: Optional[str] = None

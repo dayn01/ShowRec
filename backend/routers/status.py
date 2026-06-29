@@ -7,7 +7,7 @@ router = APIRouter(prefix="/status", tags=["status"])
 
 @router.get("")
 async def get_status():
-    jf_ok = await jellyfin.ping() if settings.jellyfin_url else None
+    jf_ok = await jellyfin.ping_user() if settings.jellyfin_url else None
     ha_ok = await homeassistant.ping() if settings.ha_url else None
     plex_ok = plex.ping() if settings.plex_url else None
     overseerr_ok = await overseerr.ping() if overseerr.is_configured() else None

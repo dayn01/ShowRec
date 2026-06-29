@@ -68,6 +68,10 @@ TMDB_API_KEY=your_tmdb_key
 JELLYFIN_URL=http://192.168.1.10:8096
 JELLYFIN_API_KEY=...
 JELLYFIN_USER_ID=...
+# Optional but recommended — your Jellyfin username. The user id can change if
+# Jellyfin is reinstalled/migrated; with this set, the app re-resolves and repairs
+# the id automatically instead of silently breaking sync.
+JELLYFIN_USERNAME=...
 
 # Optional — Plex
 PLEX_URL=http://192.168.1.10:32400
