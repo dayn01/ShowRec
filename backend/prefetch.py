@@ -454,7 +454,7 @@ async def _build_upcoming(history: list[dict], profile_id: int = 1) -> dict | No
                 "episode": ep,
             })
     except Exception as e:
-        logger.warning(f"Trakt calendar failed: {e}")
+        logger.warning(f"Trakt calendar failed: {e!r}")
 
     # Source 2: TMDB next_episode_to_air for every watched show in the local DB.
     # This works without Trakt — the DB is seeded from Jellyfin/Plex/Trakt.
@@ -560,7 +560,7 @@ async def _build_ai_picks(history: list[dict], reddit_posts: list[dict], candida
             "candidates_analysed": len(candidates),
         }
     except Exception as e:
-        logger.error(f"AI picks failed: {e}")
+        logger.error(f"AI picks failed: {e!r}")
         return None
 
 
@@ -596,7 +596,9 @@ async def _cache_show_seasons(tmdb_id: int, all_seasons: bool = True):
                 except Exception:
                     pass
     except Exception as e:
-        logger.warning(f"Failed to cache show {tmdb_id}: {e}")
+        # repr() so connectivity failures (e.g. ConnectError('[Errno 101] Network
+        # is unreachable')) show their type/message instead of a blank line.
+        logger.warning(f"Failed to cache show {tmdb_id}: {e!r}")
 
 
 async def _warm_watched_cache(profile_id: int):
@@ -766,7 +768,7 @@ async def sync_watch_state(profile: dict):
             logger.info(f"Sync[p{pid}]: Jellyfin gave {len(eps)} eps, {len(movies)} movies")
         except Exception as e:
             # Transient failure — keep existing rows rather than wiping to empty.
-            logger.warning(f"Sync[p{pid}]: Jellyfin failed (keeping existing): {e}")
+            logger.warning(f"Sync[p{pid}]: Jellyfin failed (keeping existing): {e!r}")
     else:
         # Profile isn't linked to Jellyfin — clear any stale Jellyfin rows.
         await database.replace_watched_source(pid, "jellyfin", [])
@@ -788,7 +790,7 @@ async def sync_watch_state(profile: dict):
                 rows.append(("movie", m["tmdb_id"], -1, -1, m.get("title", ""), "plex"))
             logger.info(f"Sync[p{pid}]: Plex gave {len(plex_eps)} eps, {len(plex_movies)} movies")
         except Exception as e:
-            logger.warning(f"Sync[p{pid}]: Plex failed: {e}")
+            logger.warning(f"Sync[p{pid}]: Plex failed: {e!r}")
 
     # Trakt — profile's own token, or global token for the default profile
     trakt_token = profile.get("trakt_token") or (settings.trakt_access_token if is_default else None)
@@ -818,7 +820,7 @@ async def sync_watch_state(profile: dict):
                 if tmdb_id:
                     rows.append(("movie", tmdb_id, -1, -1, entry.get("movie", {}).get("title", ""), "trakt"))
         except Exception as e:
-            logger.warning(f"Sync[p{pid}]: Trakt failed: {e}")
+            logger.warning(f"Sync[p{pid}]: Trakt failed: {e!r}")
 
     if rows:
         await database.sync_watched_bulk(pid, rows)
@@ -932,13 +934,20 @@ async def sync_all_watch_states():
                             await _cache_show_seasons(tmdb_id, all_seasons=True)
                             break
         except Exception as e:
-            logger.warning(f"Light sync[p{pid}] failed: {e}")
+            logger.warning(f"Light sync[p{pid}] failed: {e!r}")
     logger.info("Light sync: done")
 
 
 async def refresh_all():
     """Build global trending once, then refresh every profile."""
     logger.info("=== Prefetch: full refresh ===")
+    # Fail loud + early when TMDB is unreachable (e.g. the container lost its
+    # internet route): otherwise every show-detail fetch fails one-by-one and
+    # recommendations silently come back empty.
+    if not await tmdb.validate_key(settings.tmdb_api_key):
+        logger.warning("TMDB unreachable or key rejected — recommendations and caching "
+                       "will be empty until this is fixed (check the container's internet "
+                       "route / TMDB key).")
     await database.purge_stale(older_than_days=30)
 
     # Trending is global (same for everyone)
@@ -957,7 +966,7 @@ async def refresh_all():
         try:
             await refresh_profile(pid)
         except Exception as e:
-            logger.error(f"Prefetch: profile {pid} failed: {e}")
+            logger.error(f"Prefetch: profile {pid} failed: {e!r}")
 
     stats = await database.get_cache_stats()
     logger.info(f"=== Prefetch complete — {stats['shows']} shows, {stats['seasons']} seasons ===")
