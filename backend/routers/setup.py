@@ -98,21 +98,22 @@ async def save(body: SetupIn):
     if not clean.get("TMDB_API_KEY"):
         raise HTTPException(400, "A TMDB API key is required.")
 
-    # If the Jellyfin account changed, wipe synced data so it rebuilds cleanly.
     new_jf_user = clean.get("JELLYFIN_USER_ID", "")
-    jf_changed = bool(new_jf_user) and new_jf_user != (settings.jellyfin_user_id or "")
 
     # Persist to .env and apply to the live settings object. Writing the TMDB
     # key is itself the lock — once present, _configured() is true.
     env_store.update(clean)
     env_store.apply_to_settings(clean)
 
-    if jf_changed:
-        await database.wipe_synced_data()
+    # NB: we deliberately do NOT wipe data when the Jellyfin link changes. The
+    # ShowRec profile is the source of truth; Jellyfin/Plex/Trakt are just
+    # additive, replaceable watch-history sources. The next sync swaps only the
+    # 'jellyfin'-sourced rows (replace_watched_source), leaving manual marks,
+    # Netflix imports, Trakt/Plex history, watchlist and likes untouched.
 
     # Guarantee the default profile exists, is named, and is linked to the chosen
-    # Jellyfin account — so finishing setup always leaves a usable, linked profile
-    # (the auto-seed can leave it empty if .env was blank at DB-creation time).
+    # Jellyfin account — so finishing setup always leaves a usable profile (the
+    # auto-seed can leave it empty if .env was blank at DB-creation time).
     name = (body.profile_name or "Me").strip() or "Me"
     emoji = (body.profile_emoji or "🍿").strip() or "🍿"
     await database.upsert_default_profile(name, emoji, new_jf_user or None)
@@ -121,4 +122,4 @@ async def save(body: SetupIn):
     import prefetch
     asyncio.create_task(prefetch.refresh_all())
 
-    return {"ok": True, "wiped": jf_changed}
+    return {"ok": True, "wiped": False}

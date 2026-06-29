@@ -1091,19 +1091,6 @@ async def get_all_cached_show_ids() -> list[tuple[int, str]]:
             return await cur.fetchall()
 
 
-async def wipe_synced_data():
-    """
-    Clear all synced + cached data so it rebuilds cleanly from source.
-    Used when the linked Jellyfin account changes (setup wizard). Deletes
-    watch state and the TMDB/recommendation caches; keeps user-curated data
-    (profiles, dismissed titles, watchlist).
-    """
-    async with _conn() as db:
-        for table in ("watch_state", "shows", "seasons", "cache"):
-            await db.execute(f"DELETE FROM {table}")
-        await db.commit()
-
-
 async def purge_stale(older_than_days: int = 30):
     cutoff = int(time.time()) - (older_than_days * 86400)
     async with _conn() as db:
