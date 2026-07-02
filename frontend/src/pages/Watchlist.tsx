@@ -20,6 +20,7 @@ export default function Watchlist() {
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<{ id: number; mediaType: string } | null>(null);
   const [genreFilter, setGenreFilter] = useState<string[]>([]);
+  const [typeFilter, setTypeFilter] = useState<"all" | "tv" | "movie">("all");
   const [sort, setSort] = useState("smart");
   const [availMap, setAvailMap] = useState<Record<string, [number, number]>>({});
 
@@ -41,20 +42,25 @@ export default function Watchlist() {
   // Order by weight: on Jellyfin/Plex → newer episode of a show you're watching →
   // a season released recently (TMDB) → most recently added (backend: newest first).
   const onList = items.filter(i => isWatchlisted(i.id) && !isDismissed(i.id));
+  const hasTv = onList.some(i => i.media_type === "tv");
+  const hasMovie = onList.some(i => i.media_type === "movie");
+  // Narrow to the chosen media type before ranking/genre so counts and genre
+  // chips reflect only what's on screen.
+  const typed = typeFilter === "all" ? onList : onList.filter(i => i.media_type === typeFilter);
   const weight = (item: Recommendation, idx: number) =>
     (isOwned(item.id) ? 1_000_000 : 0) +
     (hasEpisodeAvailable(item.id) ? 100_000 : 0) +
     (item.new_season ? 10_000 : 0) +     // a season just dropped on TMDB
-    (onList.length - idx);               // recency (earlier index = newer)
-  const ranked = onList
+    (typed.length - idx);                // recency (earlier index = newer)
+  const ranked = typed
     .map((item, idx) => ({ item, idx }))
     .sort((a, b) => weight(b.item, b.idx) - weight(a.item, a.idx))
     .map(x => x.item);
   // "smart" = the weighted availability order; "added" keeps the backend's
   // newest-first order; the rest are generic sorts.
   const ordered = sort === "smart" ? ranked
-    : sort === "added" ? onList
-    : sortRecommendations(onList, sort);
+    : sort === "added" ? typed
+    : sortRecommendations(typed, sort);
   const visible = applyGenreFilter(ordered, genreFilter);
 
   if (loading) {
@@ -75,20 +81,33 @@ export default function Watchlist() {
     <div>
       <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginBottom: 16 }}>
         <p style={{ color: "var(--muted)", fontSize: 13, margin: 0 }}>
-          {genreFilter.length > 0
+          {genreFilter.length > 0 || typeFilter !== "all"
             ? `${visible.length} of ${onList.length} titles`
             : `${onList.length} title${onList.length !== 1 ? "s" : ""} saved to watch`}
         </p>
+        {hasTv && hasMovie && (
+          <div style={{ display: "flex", gap: 6 }}>
+            {([["all", "All"], ["tv", "TV Shows"], ["movie", "Movies"]] as const).map(([id, label]) => (
+              <button key={id} onClick={() => setTypeFilter(id)} style={{
+                padding: "4px 12px", borderRadius: 20, fontSize: 12, cursor: "pointer",
+                border: typeFilter === id ? "1px solid var(--accent)" : "1px solid var(--border)",
+                background: typeFilter === id ? "rgba(124,106,247,0.15)" : "var(--surface2)",
+                color: typeFilter === id ? "var(--accent2)" : "var(--muted)",
+                fontWeight: typeFilter === id ? 600 : 400, transition: "all 0.15s",
+              }}>{label}</button>
+            ))}
+          </div>
+        )}
         <span style={{ marginLeft: "auto" }}>
           <SortControl options={SORTS} value={sort} onChange={setSort} />
         </span>
       </div>
 
-      <GenreFilter items={onList} selected={genreFilter} onChange={setGenreFilter} />
+      <GenreFilter items={typed} selected={genreFilter} onChange={setGenreFilter} />
 
       {visible.length === 0 ? (
         <div style={{ color: "var(--muted)", textAlign: "center", padding: 40, fontSize: 14 }}>
-          No watchlist titles match the selected genres.
+          No watchlist titles match the current filters.
         </div>
       ) : (
         <div className="media-grid">
