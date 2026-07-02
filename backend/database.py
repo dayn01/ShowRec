@@ -68,6 +68,23 @@ async def _conn():
     yield db
 
 
+# ── Write serialization ───────────────────────────────────────────────────────
+# One process-wide lock held for the FULL duration of every write (execute +
+# commit). Because all writers share the single connection, without this a second
+# coroutine's commit() could flush another writer's still-open transaction — e.g.
+# splitting replace_watched_source's DELETE from its re-INSERT and losing watch
+# history. Readers don't take the lock (WAL gives them the last committed state).
+_write_lock = asyncio.Lock()
+
+
+@contextlib.asynccontextmanager
+async def _writing():
+    """Yield the shared connection under the process-wide write lock."""
+    db = await _get_db()
+    async with _write_lock:
+        yield db
+
+
 async def close():
     """Close the shared connection (called on app shutdown)."""
     global _shared_db
@@ -281,7 +298,7 @@ async def get_profile(profile_id: int) -> dict | None:
 
 async def create_profile(name: str, emoji: str = "👤", jellyfin_user_id: str | None = None,
                          plex_token: str | None = None, trakt_token: str | None = None) -> dict:
-    async with _conn() as db:
+    async with _writing() as db:
         cur = await db.execute(
             "INSERT INTO profiles (name, emoji, jellyfin_user_id, plex_token, trakt_token, created_at) VALUES (?,?,?,?,?,?)",
             (name, emoji, jellyfin_user_id or None, plex_token or None, trakt_token or None, int(time.time()))
@@ -297,7 +314,7 @@ async def update_profile(profile_id: int, **fields):
     if not sets:
         return
     cols = ", ".join(f"{k}=?" for k in sets)
-    async with _conn() as db:
+    async with _writing() as db:
         await db.execute(f"UPDATE profiles SET {cols} WHERE id=?", (*sets.values(), profile_id))
         await db.commit()
 
@@ -309,7 +326,7 @@ async def upsert_default_profile(name: str = "Me", emoji: str = "🍿",
     Jellyfin link. Creates it if missing, otherwise updates those fields. Used by
     the setup wizard so finishing setup always leaves a usable, linked profile.
     """
-    async with _conn() as db:
+    async with _writing() as db:
         async with db.execute("SELECT 1 FROM profiles WHERE id=1") as cur:
             exists = await cur.fetchone() is not None
         if exists:
@@ -327,7 +344,7 @@ async def upsert_default_profile(name: str = "Me", emoji: str = "🍿",
 
 
 async def delete_profile(profile_id: int):
-    async with _conn() as db:
+    async with _writing() as db:
         for t in ("watch_state", "dismissed", "watchlist", "liked", "stopped"):
             await db.execute(f"DELETE FROM {t} WHERE profile_id=?", (profile_id,))
         await db.execute("DELETE FROM profiles WHERE id=?", (profile_id,))
@@ -354,7 +371,7 @@ async def get_rec_settings(profile_id: int) -> dict:
 
 
 async def set_rec_settings(profile_id: int, settings: dict):
-    async with _conn() as db:
+    async with _writing() as db:
         await db.execute(
             "UPDATE profiles SET rec_settings=? WHERE id=?",
             (json.dumps(settings), profile_id)
@@ -365,7 +382,7 @@ async def set_rec_settings(profile_id: int, settings: dict):
 # ── Dismissals ("not interested") ─────────────────────────────────────────────
 
 async def add_dismissed(profile_id: int, tmdb_id: int, media_type: str, title: str = ""):
-    async with _conn() as db:
+    async with _writing() as db:
         await db.execute(
             "INSERT OR REPLACE INTO dismissed (profile_id, tmdb_id, media_type, title, dismissed_at) VALUES (?,?,?,?,?)",
             (profile_id, tmdb_id, "tv" if media_type == "tv" else "movie", title, int(time.time()))
@@ -374,7 +391,7 @@ async def add_dismissed(profile_id: int, tmdb_id: int, media_type: str, title: s
 
 
 async def remove_dismissed(profile_id: int, tmdb_id: int):
-    async with _conn() as db:
+    async with _writing() as db:
         await db.execute("DELETE FROM dismissed WHERE profile_id=? AND tmdb_id=?", (profile_id, tmdb_id))
         await db.commit()
 
@@ -388,7 +405,7 @@ async def get_dismissed_ids(profile_id: int) -> list[int]:
 # ── Liked (👍 positive taste signal) ──────────────────────────────────────────
 
 async def add_liked(profile_id: int, tmdb_id: int, media_type: str, title: str = ""):
-    async with _conn() as db:
+    async with _writing() as db:
         await db.execute(
             "INSERT OR REPLACE INTO liked (profile_id, tmdb_id, media_type, title, liked_at) VALUES (?,?,?,?,?)",
             (profile_id, tmdb_id, "tv" if media_type == "tv" else "movie", title, int(time.time()))
@@ -397,7 +414,7 @@ async def add_liked(profile_id: int, tmdb_id: int, media_type: str, title: str =
 
 
 async def remove_liked(profile_id: int, tmdb_id: int):
-    async with _conn() as db:
+    async with _writing() as db:
         await db.execute("DELETE FROM liked WHERE profile_id=? AND tmdb_id=?", (profile_id, tmdb_id))
         await db.commit()
 
@@ -422,7 +439,7 @@ async def get_liked_for_recommendations(profile_id: int) -> list[dict]:
 # ── Stopped watching (neutral "I'm done with this" — no taste penalty) ─────────
 
 async def add_stopped(profile_id: int, tmdb_id: int, media_type: str, title: str = ""):
-    async with _conn() as db:
+    async with _writing() as db:
         await db.execute(
             "INSERT OR REPLACE INTO stopped (profile_id, tmdb_id, media_type, title, stopped_at) VALUES (?,?,?,?,?)",
             (profile_id, tmdb_id, "tv" if media_type == "tv" else "movie", title, int(time.time()))
@@ -437,7 +454,7 @@ async def add_stopped(profile_id: int, tmdb_id: int, media_type: str, title: str
 
 
 async def remove_stopped(profile_id: int, tmdb_id: int):
-    async with _conn() as db:
+    async with _writing() as db:
         await db.execute("DELETE FROM stopped WHERE profile_id=? AND tmdb_id=?", (profile_id, tmdb_id))
         await db.commit()
 
@@ -477,7 +494,7 @@ async def get_stopped_full(profile_id: int) -> list[dict]:
 # ── Watchlist ─────────────────────────────────────────────────────────────────
 
 async def add_watchlist(profile_id: int, item: dict):
-    async with _conn() as db:
+    async with _writing() as db:
         await db.execute(
             """INSERT OR REPLACE INTO watchlist
                (profile_id, tmdb_id, media_type, title, poster_url, vote_average, overview, release_date, added_at)
@@ -493,7 +510,7 @@ async def add_watchlist(profile_id: int, item: dict):
 
 
 async def remove_watchlist(profile_id: int, tmdb_id: int):
-    async with _conn() as db:
+    async with _writing() as db:
         await db.execute("DELETE FROM watchlist WHERE profile_id=? AND tmdb_id=?", (profile_id, tmdb_id))
         await db.commit()
 
@@ -548,7 +565,7 @@ async def get_dismissed_full(profile_id: int) -> list[dict]:
 
 async def mark_watched(profile_id: int, media_type: str, tmdb_id: int, season: int = -1,
                        episode: int = -1, title: str = "", source: str = "user"):
-    async with _conn() as db:
+    async with _writing() as db:
         await db.execute(
             """INSERT OR REPLACE INTO watch_state
                (profile_id, media_type, tmdb_id, season_number, episode_number, title, watched_at, source)
@@ -562,7 +579,7 @@ async def mark_episodes_bulk(profile_id: int, tmdb_id: int, season: int, episode
                              title: str = "", source: str = "user"):
     now = int(time.time())
     rows = [(profile_id, "episode", tmdb_id, season, ep, title, now, source) for ep in episode_numbers]
-    async with _conn() as db:
+    async with _writing() as db:
         await db.executemany(
             """INSERT OR REPLACE INTO watch_state
                (profile_id, media_type, tmdb_id, season_number, episode_number, title, watched_at, source)
@@ -580,7 +597,7 @@ async def sync_watched_bulk(profile_id: int, rows: list[tuple]):
     """
     now = int(time.time())
     full_rows = [(profile_id, r[0], r[1], r[2], r[3], r[4], now, r[5]) for r in rows]
-    async with _conn() as db:
+    async with _writing() as db:
         await db.executemany(
             """INSERT OR IGNORE INTO watch_state
                (profile_id, media_type, tmdb_id, season_number, episode_number, title, watched_at, source)
@@ -602,7 +619,7 @@ async def replace_watched_source(profile_id: int, source: str, rows: list[tuple]
     """
     now = int(time.time())
     full = [(profile_id, r[0], r[1], r[2], r[3], r[4], now, source) for r in rows]
-    async with _conn() as db:
+    async with _writing() as db:
         await db.execute(
             "DELETE FROM watch_state WHERE profile_id=? AND source=?", (profile_id, source)
         )
@@ -617,7 +634,7 @@ async def replace_watched_source(profile_id: int, source: str, rows: list[tuple]
 
 
 async def unmark_watched(profile_id: int, media_type: str, tmdb_id: int, season: int = -1, episode: int = -1):
-    async with _conn() as db:
+    async with _writing() as db:
         await db.execute(
             """DELETE FROM watch_state
                WHERE profile_id=? AND media_type=? AND tmdb_id=? AND season_number=? AND episode_number=?""",
@@ -628,7 +645,7 @@ async def unmark_watched(profile_id: int, media_type: str, tmdb_id: int, season:
 
 async def unmark_season(profile_id: int, tmdb_id: int, season: int):
     """Remove a season-level mark and all its episode rows."""
-    async with _conn() as db:
+    async with _writing() as db:
         await db.execute(
             "DELETE FROM watch_state WHERE profile_id=? AND tmdb_id=? AND season_number=? AND media_type='episode'",
             (profile_id, tmdb_id, season)
@@ -637,7 +654,7 @@ async def unmark_season(profile_id: int, tmdb_id: int, season: int):
 
 
 async def unmark_show(profile_id: int, tmdb_id: int):
-    async with _conn() as db:
+    async with _writing() as db:
         await db.execute("DELETE FROM watch_state WHERE profile_id=? AND tmdb_id=?", (profile_id, tmdb_id))
         await db.commit()
 
@@ -985,7 +1002,7 @@ async def cache_get(key: str, ttl_key: str) -> dict | list | None:
 
 
 async def cache_set(key: str, value: dict | list):
-    async with _conn() as db:
+    async with _writing() as db:
         await db.execute(
             "INSERT OR REPLACE INTO cache (key, data, cached_at) VALUES (?, ?, ?)",
             (key, json.dumps(value), int(time.time()))
@@ -1050,7 +1067,7 @@ async def get_shows_bulk(tmdb_ids: list[int]) -> dict[int, dict]:
 
 
 async def set_show(tmdb_id: int, media_type: str, data: dict):
-    async with _conn() as db:
+    async with _writing() as db:
         await db.execute(
             "INSERT OR REPLACE INTO shows (tmdb_id, media_type, data, cached_at) VALUES (?,?,?,?)",
             (tmdb_id, media_type, json.dumps(data), int(time.time()))
@@ -1075,7 +1092,7 @@ async def get_season(tmdb_id: int, season_number: int) -> dict | None:
 
 
 async def set_season(tmdb_id: int, season_number: int, data: dict):
-    async with _conn() as db:
+    async with _writing() as db:
         await db.execute(
             "INSERT OR REPLACE INTO seasons (tmdb_id, season_number, data, cached_at) VALUES (?,?,?,?)",
             (tmdb_id, season_number, json.dumps(data), int(time.time()))
@@ -1093,7 +1110,7 @@ async def get_all_cached_show_ids() -> list[tuple[int, str]]:
 
 async def purge_stale(older_than_days: int = 30):
     cutoff = int(time.time()) - (older_than_days * 86400)
-    async with _conn() as db:
+    async with _writing() as db:
         await db.execute("DELETE FROM shows   WHERE cached_at < ?", (cutoff,))
         await db.execute("DELETE FROM seasons WHERE cached_at < ?", (cutoff,))
         await db.execute("DELETE FROM cache   WHERE cached_at < ?", (cutoff,))
