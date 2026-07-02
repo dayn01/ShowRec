@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useWatched } from "../WatchedContext";
 import { api, NextUpEpisode } from "../api";
 import DetailModal from "../components/DetailModal";
@@ -54,14 +54,26 @@ export default function Watching() {
     refreshNextUp();
   }, [refreshNextUp]);
 
+  // Shows with an in-flight "mark next" — ref for the synchronous guard (no stale
+  // closure), state to disable the button. Prevents a double-tap firing two POSTs.
+  const markingNextRef = useRef<Set<number>>(new Set());
+  const [markingNext, setMarkingNext] = useState<Set<number>>(new Set());
+
   // Mark the next episode watched straight from the card, then advance "next up".
   async function markNext(show: ShowDetail, nu: NextUpEpisode) {
+    if (markingNextRef.current.has(show.id)) return;   // already marking this show
+    markingNextRef.current.add(show.id);
+    setMarkingNext(m => new Set(m).add(show.id));
     const total = show.seasons?.find(s => s.season_number === nu.season)?.episode_count;
     try {
       await api.markEpisodeWatched(show.id, show.title, nu.season, nu.episode);
       markEpisodeWatched(show.id, nu.season, nu.episode, total);
       refreshNextUp();
     } catch { /* leave the row as-is so the user can retry */ }
+    finally {
+      markingNextRef.current.delete(show.id);
+      setMarkingNext(m => { const s = new Set(m); s.delete(show.id); return s; });
+    }
   }
 
   // "Ready to continue" = the newest downloaded episode (on your server) hasn't
@@ -330,12 +342,15 @@ export default function Watching() {
                       </span>
                       <button
                         onClick={e => { e.stopPropagation(); markNext(show, nu); }}
+                        disabled={markingNext.has(show.id)}
                         style={{
                           padding: "3px 10px", borderRadius: 20, border: "1px solid var(--border)",
                           background: "var(--surface2)", color: "var(--text)", fontSize: 11,
-                          fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap",
+                          fontWeight: 600, whiteSpace: "nowrap",
+                          cursor: markingNext.has(show.id) ? "default" : "pointer",
+                          opacity: markingNext.has(show.id) ? 0.6 : 1,
                         }}
-                      >✓ Mark watched</button>
+                      >{markingNext.has(show.id) ? "✓ Marking…" : "✓ Mark watched"}</button>
                       {link?.url && (
                         <a
                           href={link.url} target="_blank" rel="noreferrer"

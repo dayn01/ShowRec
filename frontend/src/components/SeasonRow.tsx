@@ -234,24 +234,25 @@ export default function SeasonRow({ season, tmdbId, showTitle, autoExpand = fals
   async function markSeason() {
     setState("loading");
     try {
-      // Get episode numbers — use cached data or fetch now
-      let epNumbers: number[] | undefined;
-      if (episodeData?.episodes?.length) {
-        epNumbers = episodeData.episodes.map(ep => ep.episode_number);
-      } else {
+      // Get the episode list — from already-loaded data, or fetch it now if the
+      // season was never expanded.
+      let episodes = episodeData?.episodes;
+      if (!episodes?.length) {
         try {
           const data = await api.getSeasonEpisodes(tmdbId, season.season_number);
-          epNumbers = data.episodes.map(ep => ep.episode_number);
+          episodes = data.episodes;
         } catch { /* fall back to count-only */ }
       }
 
-      // Only mark episodes that have actually aired
+      // Only mark episodes that have actually aired — applied to whichever list we
+      // obtained (previously the aired filter was skipped on the fetch-now path,
+      // so marking a collapsed season also marked unaired episodes).
       const today = new Date().toISOString().slice(0, 10);
-      if (episodeData?.episodes?.length) {
-        epNumbers = episodeData.episodes
-          .filter(ep => !ep.air_date || ep.air_date <= today)
-          .map(ep => ep.episode_number);
-      }
+      const epNumbers = episodes?.length
+        ? episodes
+            .filter(ep => !ep.air_date || ep.air_date <= today)
+            .map(ep => ep.episode_number)
+        : undefined;
 
       await api.markSeasonWatched(tmdbId, showTitle, season.season_number, epNumbers);
       markSeasonWatched(tmdbId, season.season_number, season.episode_count, epNumbers);

@@ -6,6 +6,10 @@ ENV_FILE = Path(__file__).parent.parent / ".env"
 
 
 class Settings(BaseSettings):
+    # IANA timezone for the daily notification schedule (e.g. "Australia/Sydney").
+    # Defaults to UTC; without it the 08:00/09:00 checks fire in UTC, not local time.
+    timezone: str = "UTC"
+
     tmdb_api_key: str = ""
     trakt_client_id: str = ""
     trakt_client_secret: str = ""

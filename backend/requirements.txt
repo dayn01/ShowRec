@@ -8,3 +8,4 @@ pydantic-settings>=2.6.0
 plexapi>=4.15.16
 anthropic>=0.40.0
 aiosqlite>=0.20.0
+tzdata>=2024.1

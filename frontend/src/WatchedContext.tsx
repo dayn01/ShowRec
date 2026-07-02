@@ -341,9 +341,15 @@ export function WatchedProvider({ children }: { children: ReactNode }) {
   const isEpisodeWatched = useCallback((tmdbId: number, season: number, episode: number) =>
     watchedEpisodes.has(epKey(tmdbId, season, episode)), [watchedEpisodes]);
 
+  // Keys marked-watched this session, updated synchronously — `watchedEpisodes`
+  // in the callback below is the memoized (stale) set, so two rapid clicks would
+  // otherwise both pass `.has()` and double-count season progress.
+  const markingEpisodesRef = useRef<Set<string>>(new Set());
+
   const markEpisodeWatched = useCallback((tmdbId: number, season: number, episode: number, totalEpisodes?: number) => {
     const key = epKey(tmdbId, season, episode);
-    if (watchedEpisodes.has(key)) return; // already marked
+    if (watchedEpisodes.has(key) || markingEpisodesRef.current.has(key)) return; // already marked / in-flight
+    markingEpisodesRef.current.add(key);
     setWatchedEpisodes(p => new Set([...p, key]));
     setProgressMap(p => {
       const k = sKey(tmdbId, season);
@@ -357,6 +363,7 @@ export function WatchedProvider({ children }: { children: ReactNode }) {
 
   const markEpisodeUnwatched = useCallback((tmdbId: number, season: number, episode: number) => {
     const key = epKey(tmdbId, season, episode);
+    markingEpisodesRef.current.delete(key);   // allow a later re-mark
     if (!watchedEpisodes.has(key)) return;
     setWatchedEpisodes(p => { const s = new Set(p); s.delete(key); return s; });
     setProgressMap(p => {

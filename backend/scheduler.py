@@ -5,10 +5,21 @@ APScheduler jobs:
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from integrations import trakt, homeassistant, overseerr
 from config import settings
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import logging
 
 logger = logging.getLogger(__name__)
 scheduler = AsyncIOScheduler()
+
+
+def _tz():
+    """Resolve settings.timezone to a tzinfo for the daily cron jobs, falling
+    back to UTC (with a warning) if the name is invalid or tz data is missing."""
+    try:
+        return ZoneInfo(settings.timezone or "UTC")
+    except (ZoneInfoNotFoundError, ValueError):
+        logger.warning("Invalid timezone %r; daily notifications will run in UTC", settings.timezone)
+        return ZoneInfo("UTC")
 
 
 async def check_requests_ready():
@@ -163,10 +174,11 @@ def start():
     # loop — the same loop the API uses, so they share the one SQLite connection
     # instead of each spinning up a separate loop in a worker thread.
     import prefetch
-    scheduler.add_job(check_upcoming_episodes, "cron", hour=8, minute=0, id="daily_episodes")
-    scheduler.add_job(check_new_seasons, "cron", hour=9, minute=0, id="new_seasons")
+    tz = _tz()  # daily checks fire at local wall-clock, not UTC
+    scheduler.add_job(check_upcoming_episodes, "cron", hour=8, minute=0, timezone=tz, id="daily_episodes")
+    scheduler.add_job(check_new_seasons, "cron", hour=9, minute=0, timezone=tz, id="new_seasons")
     scheduler.add_job(prefetch.refresh_all, "interval", hours=6, id="full_refresh")
     scheduler.add_job(prefetch.sync_all_watch_states, "interval", minutes=15, id="light_sync")
     scheduler.add_job(check_requests_ready, "interval", minutes=30, id="requests_ready")
     scheduler.start()
-    logger.info("Scheduler started — episode check 08:00, new-season check 09:00, light sync 15m, full refresh 6h, request-ready 30m")
+    logger.info("Scheduler started (%s) — episode check 08:00, new-season check 09:00, light sync 15m, full refresh 6h, request-ready 30m", tz)
