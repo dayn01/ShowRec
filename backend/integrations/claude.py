@@ -12,7 +12,7 @@ def get_ai_recommendations(
     watch_history: list[dict],
     reddit_posts: list[dict],
     tmdb_candidates: list[dict],
-) -> list[dict]:
+) -> dict:
     """
     Ask Claude to pick and explain the best recommendations given:
     - The user's watch history (titles, genres, ratings)
@@ -76,21 +76,34 @@ Respond with ONLY valid JSON, no markdown, no explanation outside the JSON:
         messages=[{"role": "user", "content": prompt}],
     )
 
-    raw = message.content[0].text.strip()
-    if raw.startswith("```"):
-        raw = raw.split("```")[1]
-        if raw.startswith("json"):
-            raw = raw[4:]
-    return json.loads(raw)
+    return _parse_json(message.content[0].text if message.content else "")
 
 
 def _parse_json(text: str) -> dict:
-    text = text.strip()
+    """
+    Best-effort parse of the model's JSON reply. NEVER raises: if the response
+    isn't valid JSON (prose around it, a truncated object from max_tokens, a
+    stray fence), fall back to the outermost {...} span, and finally to an empty
+    result — so the AI routes degrade to "no picks" instead of a 500.
+    """
+    text = (text or "").strip()
     if text.startswith("```"):
-        text = text.split("```")[1]
+        # strip a ```json … ``` fence
+        parts = text.split("```")
+        text = parts[1] if len(parts) > 1 else text
         if text.startswith("json"):
             text = text[4:]
-    return json.loads(text)
+    text = text.strip()
+    try:
+        return json.loads(text)
+    except (ValueError, TypeError):
+        start, end = text.find("{"), text.rfind("}")
+        if start != -1 and end > start:
+            try:
+                return json.loads(text[start:end + 1])
+            except (ValueError, TypeError):
+                pass
+    return {"picks": []}
 
 
 def get_custom_recommendations(

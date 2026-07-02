@@ -76,10 +76,16 @@ async def get_ai_recs(pid: int = Depends(get_profile_id)):
 
     picks = []
     for pick in ai_result.get("picks", []):
-        candidate = candidates.get(pick["tmdb_id"], {})
+        # The model may omit tmdb_id or return it as a string; skip unusable
+        # picks rather than 500 the whole request (candidates are int-keyed).
+        try:
+            tid = int(pick["tmdb_id"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        candidate = candidates.get(tid, {})
         picks.append({
             **candidate,
-            "id": pick["tmdb_id"],
+            "id": tid,
             "title": pick.get("title") or candidate.get("title") or candidate.get("name"),
             "reason": pick.get("reason"),
             "reddit_buzz": pick.get("reddit_buzz"),
@@ -172,10 +178,15 @@ async def get_custom_recs(req: CustomRequest, pid: int = Depends(get_profile_id)
 
     picks = []
     for pick in ai_result.get("picks", []):
-        candidate = candidates.get(pick["tmdb_id"], {})
+        # Skip picks with a missing/non-numeric tmdb_id instead of 500ing.
+        try:
+            tid = int(pick["tmdb_id"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        candidate = candidates.get(tid, {})
         picks.append({
             **candidate,
-            "id": pick["tmdb_id"],
+            "id": tid,
             "title": pick.get("title") or candidate.get("title") or candidate.get("name"),
             "reason": pick.get("reason"),
             "reddit_buzz": pick.get("reddit_buzz"),

@@ -540,10 +540,17 @@ async def _build_ai_picks(history: list[dict], reddit_posts: list[dict], candida
 
         picks = []
         for pick in ai_result.get("picks", []):
-            candidate = candidates.get(pick["tmdb_id"], {})
+            # candidates are int-keyed; a missing/string tmdb_id would otherwise
+            # miss the lookup (losing poster/genre) or, if absent, KeyError and
+            # abort the whole AI build. Coerce and skip unusable picks.
+            try:
+                tid = int(pick["tmdb_id"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            candidate = candidates.get(tid, {})
             picks.append({
                 **candidate,
-                "id": pick["tmdb_id"],
+                "id": tid,
                 "title": pick.get("title") or candidate.get("title") or candidate.get("name"),
                 "reason": pick.get("reason"),
                 "reddit_buzz": pick.get("reddit_buzz"),
