@@ -11,6 +11,9 @@ secret-writing off the unauthenticated LAN surface after the one-time setup.
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 import asyncio
+import ipaddress
+import socket
+from urllib.parse import urlparse
 
 import env_store
 import database
@@ -18,6 +21,31 @@ from config import settings
 from integrations import tmdb, jellyfin
 
 router = APIRouter(prefix="/setup", tags=["setup"])
+
+
+def _validate_external_url(url: str) -> None:
+    """
+    Blunt SSRF via the (pre-config, unauthenticated) wizard test endpoints: only
+    allow http/https, and reject hosts that resolve to loopback or link-local —
+    the latter covers the cloud-metadata endpoint (169.254.169.254). Private LAN
+    ranges (192.168/10/172.16) are allowed on purpose: that's where a
+    self-hosted Jellyfin actually lives, so blocking them would defeat setup.
+    """
+    parsed = urlparse((url or "").strip())
+    if parsed.scheme not in ("http", "https"):
+        raise HTTPException(400, "URL must start with http:// or https://")
+    host = parsed.hostname
+    if not host:
+        raise HTTPException(400, "URL must include a host")
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    try:
+        infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
+    except socket.gaierror:
+        raise HTTPException(400, f"Could not resolve host: {host}")
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0])
+        if ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved or ip.is_unspecified:
+            raise HTTPException(400, "URL resolves to a blocked address range")
 
 
 def _configured() -> bool:
@@ -76,6 +104,7 @@ class JellyfinTest(BaseModel):
 @router.post("/test/jellyfin")
 async def test_jellyfin(body: JellyfinTest):
     _guard()
+    _validate_external_url(body.url)
     users = await jellyfin.list_users(body.url, body.api_key)
     return {"ok": users is not None, "users": users or []}
 
@@ -98,11 +127,26 @@ async def save(body: SetupIn):
     if not clean.get("TMDB_API_KEY"):
         raise HTTPException(400, "A TMDB API key is required.")
 
+    # .strip() removes surrounding whitespace but not embedded newlines; a value
+    # with a \n would inject extra KEY=VALUE lines into .env. Reject outright.
+    for k, v in clean.items():
+        if "\n" in v or "\r" in v:
+            raise HTTPException(400, f"{k} contains invalid characters (newlines).")
+
     new_jf_user = clean.get("JELLYFIN_USER_ID", "")
 
     # Persist to .env and apply to the live settings object. Writing the TMDB
     # key is itself the lock — once present, _configured() is true.
-    env_store.update(clean)
+    try:
+        env_store.update(clean)
+    except OSError:
+        # .env is commonly mounted read-only in Docker (see docker-compose.yml).
+        # Surface a clear, actionable error rather than a bare 500.
+        raise HTTPException(
+            409,
+            "Could not write .env (it may be mounted read-only, as in the Docker "
+            "setup). Edit .env on the host and restart the service instead.",
+        )
     env_store.apply_to_settings(clean)
 
     # NB: we deliberately do NOT wipe data when the Jellyfin link changes. The

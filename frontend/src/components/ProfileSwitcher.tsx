@@ -57,7 +57,7 @@ export default function ProfileSwitcher() {
     setEditingId(p.id);
     setName(p.name); setEmoji(p.emoji || "👤");
     setJfUser(p.jellyfin_user_id || "");
-    setPlexUser(p.plex_token ? KEEP : "");  // can't know which Plex user from token alone
+    setPlexUser(p.plex_linked ? KEEP : "");  // can't know which Plex user from token alone
     loadUserLists();
   }
 
@@ -141,7 +141,7 @@ export default function ProfileSwitcher() {
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 14, fontWeight: 600 }}>{p.name}</div>
                   <div style={{ fontSize: 11, color: "var(--muted)" }}>
-                    {[p.jellyfin_user_id && "Jellyfin", p.plex_token && "Plex"].filter(Boolean).join(" + ") || "Standalone"}
+                    {[p.jellyfin_user_id && "Jellyfin", p.plex_linked && "Plex"].filter(Boolean).join(" + ") || "Standalone"}
                   </div>
                 </div>
                 {p.id === activeId && <span style={{ color: "var(--accent2)", fontSize: 13 }}>✓</span>}

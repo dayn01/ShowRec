@@ -38,8 +38,8 @@ export interface Profile {
   name: string;
   emoji: string;
   jellyfin_user_id: string | null;
-  plex_token: string | null;
-  trakt_token: string | null;
+  plex_linked: boolean;   // server never sends the raw token, only whether a link exists
+  trakt_linked: boolean;
 }
 
 export interface RecSettings {

@@ -7,6 +7,20 @@ import database
 router = APIRouter(prefix="/profiles", tags=["profiles"])
 
 
+def _public(profile: dict | None) -> dict | None:
+    """
+    Strip secret tokens before returning a profile to the client. The DB layer
+    keeps returning plex_token/trakt_token for internal use (prefetch reads them
+    to sync/recommend); the API only ever exposes whether a link exists.
+    """
+    if not profile:
+        return profile
+    p = dict(profile)
+    p["plex_linked"] = bool(p.pop("plex_token", None))
+    p["trakt_linked"] = bool(p.pop("trakt_token", None))
+    return p
+
+
 class ProfileIn(BaseModel):
     name: str
     emoji: str = "👤"
@@ -36,7 +50,7 @@ class ProfileUpdate(BaseModel):
 
 @router.get("")
 async def list_profiles():
-    return {"profiles": await database.list_profiles()}
+    return {"profiles": [_public(p) for p in await database.list_profiles()]}
 
 
 @router.post("")
@@ -48,7 +62,7 @@ async def create_profile(p: ProfileIn):
     # Kick off a background build for the new profile
     import prefetch, asyncio
     asyncio.create_task(prefetch.refresh_profile(profile["id"]))
-    return profile
+    return _public(profile)
 
 
 @router.patch("/{profile_id}")
@@ -79,7 +93,7 @@ async def update_profile(profile_id: int, p: ProfileUpdate):
         import prefetch, asyncio
         asyncio.create_task(prefetch.refresh_profile(profile_id))
 
-    return await database.get_profile(profile_id)
+    return _public(await database.get_profile(profile_id))
 
 
 class RecSettingsIn(BaseModel):
