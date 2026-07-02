@@ -167,14 +167,45 @@ async def _migrate_add_profiles(db):
         """)
 
 
+async def _migrate_shows_composite_key(db):
+    """
+    Re-key the shows cache on (tmdb_id, media_type). It was originally keyed on
+    tmdb_id alone, but TMDB movie and TV ids overlap — so a movie and a series
+    with the same id clobbered each other (INSERT OR REPLACE) and could return
+    wrong-type data. Safe to lose rows in the worst case: shows is a cache,
+    repopulated from TMDB. Idempotent: skips if media_type is already in the PK.
+    """
+    if not await _table_exists(db, "shows"):
+        return
+    async with db.execute("PRAGMA table_info(shows)") as cur:
+        cols = await cur.fetchall()  # (cid, name, type, notnull, dflt, pk)
+    if any(c[1] == "media_type" and c[5] > 0 for c in cols):
+        return  # already composite-keyed
+    await db.executescript("""
+        CREATE TABLE shows_new (
+            tmdb_id     INTEGER NOT NULL,
+            media_type  TEXT NOT NULL,
+            data        TEXT NOT NULL,
+            cached_at   INTEGER NOT NULL,
+            PRIMARY KEY (tmdb_id, media_type)
+        );
+        INSERT OR REPLACE INTO shows_new (tmdb_id, media_type, data, cached_at)
+            SELECT tmdb_id, media_type, data, cached_at FROM shows;
+        DROP TABLE shows;
+        ALTER TABLE shows_new RENAME TO shows;
+        CREATE INDEX IF NOT EXISTS idx_shows_cached ON shows(cached_at);
+    """)
+
+
 async def init():
     async with _conn() as db:
         await db.executescript("""
             CREATE TABLE IF NOT EXISTS shows (
-                tmdb_id     INTEGER PRIMARY KEY,
+                tmdb_id     INTEGER NOT NULL,
                 media_type  TEXT NOT NULL,
                 data        TEXT NOT NULL,
-                cached_at   INTEGER NOT NULL
+                cached_at   INTEGER NOT NULL,
+                PRIMARY KEY (tmdb_id, media_type)
             );
             CREATE TABLE IF NOT EXISTS seasons (
                 tmdb_id       INTEGER NOT NULL,
@@ -257,6 +288,8 @@ async def init():
         """)
         # Migrate legacy tables to add profile_id BEFORE creating the profile index
         await _migrate_add_profiles(db)
+        # Re-key the shows cache on (tmdb_id, media_type) if it predates that.
+        await _migrate_shows_composite_key(db)
         # Add rec_settings to profiles created before tuning existed
         if await _table_exists(db, "profiles") and not await _has_column(db, "profiles", "rec_settings"):
             await db.execute("ALTER TABLE profiles ADD COLUMN rec_settings TEXT")
@@ -1022,9 +1055,21 @@ async def cache_age(key: str) -> int | None:
 
 # ── Shows ─────────────────────────────────────────────────────────────────────
 
-async def get_show(tmdb_id: int, allow_stale: bool = False) -> dict | None:
+async def get_show(tmdb_id: int, media_type: str | None = None, allow_stale: bool = False) -> dict | None:
+    """
+    Cached show/movie record. Pass media_type to disambiguate: TMDB movie and
+    TV ids overlap, so an id-only lookup on a colliding id could return the
+    wrong type. Without media_type, returns the most-recently-cached record.
+    """
     async with _conn() as db:
-        async with db.execute("SELECT data, cached_at FROM shows WHERE tmdb_id=?", (tmdb_id,)) as cur:
+        if media_type:
+            q = ("SELECT data, cached_at FROM shows WHERE tmdb_id=? AND media_type=? "
+                 "ORDER BY cached_at DESC LIMIT 1")
+            params: tuple = (tmdb_id, media_type)
+        else:
+            q = "SELECT data, cached_at FROM shows WHERE tmdb_id=? ORDER BY cached_at DESC LIMIT 1"
+            params = (tmdb_id,)
+        async with db.execute(q, params) as cur:
             row = await cur.fetchone()
     if not row:
         return None
@@ -1058,8 +1103,11 @@ async def get_shows_bulk(tmdb_ids: list[int]) -> dict[int, dict]:
         for i in range(0, len(tmdb_ids), 800):
             chunk = tmdb_ids[i:i + 800]
             qmarks = ",".join("?" * len(chunk))
+            # ORDER BY cached_at ASC so that when a movie and TV id collide, the
+            # freshest record wins the {tmdb_id: data} slot deterministically.
             async with db.execute(
-                f"SELECT tmdb_id, data FROM shows WHERE tmdb_id IN ({qmarks})", chunk
+                f"SELECT tmdb_id, data FROM shows WHERE tmdb_id IN ({qmarks}) ORDER BY cached_at ASC",
+                chunk
             ) as cur:
                 for tid, data in await cur.fetchall():
                     out[tid] = json.loads(data)

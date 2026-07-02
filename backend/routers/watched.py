@@ -91,7 +91,7 @@ async def mark_watched(item: WatchedItem, pid: int = Depends(get_profile_id)):
     marked_seasons = []
     try:
         from routers.details import _fetch_and_cache_show, _fetch_and_cache_season
-        show = await database.get_show(item.tmdb_id) or await _fetch_and_cache_show(item.tmdb_id, "tv")
+        show = await database.get_show(item.tmdb_id, "tv") or await _fetch_and_cache_show(item.tmdb_id, "tv")
         for s in show.get("seasons", []):
             sn = s.get("season_number")
             if sn is None or sn < 1:

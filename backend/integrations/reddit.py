@@ -32,23 +32,20 @@ async def get_trending_posts(limit_per_sub: int = 5) -> list[dict]:
 
     posts = []
     token = await _get_token()
+    # Credentials are configured (checked above) but the token fetch failed —
+    # a transient blip at Reddit's token endpoint. Don't fall through to the
+    # public endpoint, which Reddit blocks for servers; just skip this round.
+    if not token:
+        return []
 
     async with httpx.AsyncClient(timeout=10) as client:
         for sub in SUBREDDITS:
             try:
-                if token:
-                    r = await client.get(
-                        f"https://oauth.reddit.com/r/{sub}/hot.json",
-                        params={"limit": limit_per_sub},
-                        headers={"Authorization": f"Bearer {token}", "User-Agent": USER_AGENT},
-                    )
-                else:
-                    # Public JSON API — no auth needed, rate limited
-                    r = await client.get(
-                        f"https://www.reddit.com/r/{sub}/hot.json",
-                        params={"limit": limit_per_sub},
-                        headers={"User-Agent": USER_AGENT},
-                    )
+                r = await client.get(
+                    f"https://oauth.reddit.com/r/{sub}/hot.json",
+                    params={"limit": limit_per_sub},
+                    headers={"Authorization": f"Bearer {token}", "User-Agent": USER_AGENT},
+                )
                 if r.status_code != 200:
                     continue
                 for child in r.json()["data"]["children"]:

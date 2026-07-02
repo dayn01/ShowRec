@@ -114,8 +114,15 @@ async def get_watched_movies(user_id: str | None = None) -> list[dict]:
     for m in movies:
         pid = m.get("ProviderIds", {})
         tmdb = pid.get("Tmdb") or pid.get("tmdb")
-        if tmdb:
+        if not tmdb:
+            continue
+        try:
+            # Jellyfin doesn't guarantee a clean integer Tmdb id (can be a URL,
+            # an IMDb-style value, or empty). Skip the bad row instead of
+            # aborting the whole movie sync — matches get_watched_episodes.
             result.append({"tmdb_id": int(tmdb), "title": m.get("Name", "")})
+        except (ValueError, TypeError):
+            continue
     return result
 
 

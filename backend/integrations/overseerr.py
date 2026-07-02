@@ -5,8 +5,11 @@ checked `is_configured()` (or the router has), mirroring how jellyfin/plex are
 gated in routers/status.py. When Overseerr isn't configured the feature simply
 never surfaces in the UI.
 """
+import logging
 import httpx
 from config import settings
+
+logger = logging.getLogger("showrec.overseerr")
 
 # Overseerr media availability codes (mediaInfo.status).
 _STATUS = {
@@ -97,28 +100,39 @@ async def get_all_statuses() -> dict[int, str]:
     result: dict[int, str] = {}
     take = 100
     skip = 0
-    try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            for _ in range(50):  # hard cap: 5000 items, avoids runaway loops
+    async with httpx.AsyncClient(timeout=15) as client:
+        for _ in range(50):  # hard cap: 5000 items, avoids runaway loops
+            # Guard each page independently: a transient error on page N must
+            # not discard the whole map (a truncated map reads as "not
+            # requested" for everything past the failure). Stop paginating and
+            # return what we have, but log it so silent partials are visible.
+            try:
                 r = await client.get(
                     f"{_base()}/api/v1/media",
                     headers=_headers(),
                     params={"take": take, "skip": skip},
                 )
                 if r.status_code != 200:
+                    logger.warning("Overseerr /media page at skip=%d returned %d; returning partial map (%d items)",
+                                   skip, r.status_code, len(result))
                     break
                 data = r.json() or {}
-                items = data.get("results", [])
-                for m in items:
-                    tmdb = m.get("tmdbId")
-                    if tmdb is not None:
+            except Exception as e:
+                logger.warning("Overseerr /media page at skip=%d failed (%r); returning partial map (%d items)",
+                               skip, e, len(result))
+                break
+            items = data.get("results", [])
+            for m in items:
+                tmdb = m.get("tmdbId")
+                if tmdb is not None:
+                    try:
                         result[int(tmdb)] = _STATUS.get(m.get("status"), "unknown")
-                total = (data.get("pageInfo") or {}).get("results", 0)
-                skip += take
-                if not items or skip >= total:
-                    break
-    except Exception:
-        pass
+                    except (ValueError, TypeError):
+                        continue
+            total = (data.get("pageInfo") or {}).get("results", 0)
+            skip += take
+            if not items or skip >= total:
+                break
     return result
 
 

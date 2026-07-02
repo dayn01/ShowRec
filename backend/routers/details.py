@@ -108,7 +108,9 @@ def _shape_season(data: dict) -> dict:
 async def get_details(media_type: str, tmdb_id: int):
     if media_type not in ("tv", "movie"):
         raise HTTPException(400, "media_type must be 'tv' or 'movie'")
-    cached = await database.get_show(tmdb_id)
+    # Look up by (id, media_type): TMDB movie and TV ids overlap, so an id-only
+    # lookup could return the wrong-type record for a colliding id.
+    cached = await database.get_show(tmdb_id, media_type)
     if cached:
         return cached
     try:
@@ -160,7 +162,8 @@ async def get_details_batch(body: DetailsBatchIn):
 
     async def one(tmdb_id: int):
         # Serve cached even if stale — Watching cares about speed, not freshness.
-        show = await database.get_show(tmdb_id, allow_stale=True)
+        # Watching is TV-only, so the batch fetches misses as "tv" below.
+        show = await database.get_show(tmdb_id, "tv", allow_stale=True)
         if not show:
             async with sem:
                 try:
@@ -242,7 +245,7 @@ async def _tastedive_similar(tmdb_id: int, media_type: str, limit: int) -> list[
     """TasteDive 'also like' titles resolved to TMDB items. [] if no key / no title."""
     if not tastedive.enabled():
         return []
-    show = await database.get_show(tmdb_id)
+    show = await database.get_show(tmdb_id, media_type)
     if not show:
         try:
             show = await _fetch_and_cache_show(tmdb_id, media_type)
@@ -322,7 +325,11 @@ async def get_watch_providers(media_type: str, tmdb_id: int, region: str = "AU")
     all_regions = await database.cache_get(cache_key, "providers")
     if all_regions is None:
         all_regions = await tmdb.get_watch_providers(tmdb_id, media_type)
-        await database.cache_set(cache_key, all_regions)
+        # tmdb.get_watch_providers returns {} on ANY error (timeout/non-200), so
+        # only cache a non-empty result — otherwise a transient TMDB blip gets
+        # frozen as "no providers" for the full 24h TTL. Empty is retried next call.
+        if all_regions:
+            await database.cache_set(cache_key, all_regions)
 
     region_data = all_regions.get(region) or {}
     return {"region": region, "available_regions": sorted(all_regions.keys()), **_shape_providers(region_data)}
@@ -342,7 +349,7 @@ async def get_season_episodes(tmdb_id: int, season_number: int):
 @router.post("/tv/{tmdb_id}/prefetch-seasons")
 async def prefetch_seasons(tmdb_id: int):
     """Pre-fetch all seasons for a show into the cache."""
-    show = await database.get_show(tmdb_id)
+    show = await database.get_show(tmdb_id, "tv")
     if not show:
         try:
             show = await _fetch_and_cache_show(tmdb_id, "tv")
