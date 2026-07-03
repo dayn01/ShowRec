@@ -298,9 +298,10 @@ export default function DetailModal({ tmdbId, mediaType, onClose }: Props) {
             )}
 
             {/* Main content */}
-            <div style={{ display: "flex", gap: 24, padding: "0 24px 24px", marginTop: data.backdrop_url ? -80 : 24 }}>
+            <div className="modal-hero" style={{ display: "flex", gap: 24, padding: "0 24px 24px", marginTop: data.backdrop_url ? -80 : 24 }}>
               {/* Poster */}
               <img
+                className="modal-poster"
                 src={data.poster_url || PLACEHOLDER}
                 alt={data.title}
                 style={{ width: 140, height: 210, objectFit: "cover", borderRadius: 10, flexShrink: 0, border: "2px solid var(--border)", position: "relative" }}
@@ -308,13 +309,13 @@ export default function DetailModal({ tmdbId, mediaType, onClose }: Props) {
               />
 
               {/* Info */}
-              <div style={{ flex: 1, paddingTop: data.backdrop_url ? 80 : 0 }}>
+              <div className="modal-info" style={{ flex: 1, paddingTop: data.backdrop_url ? 80 : 0 }}>
                 <div style={{ display: "flex", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
                   <h2 style={{ fontSize: 22, fontWeight: 700, flex: 1 }}>{data.title}</h2>
                   <span style={{ fontWeight: 700, fontSize: 18, color: scoreColor }}>{score > 0 ? `${score}%` : "N/A"}</span>
                 </div>
 
-                <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+                <div className="modal-actions" style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
                   <button
                     onClick={toggleWatched}
                     disabled={loading}

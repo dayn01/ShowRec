@@ -110,4 +110,22 @@ a { color: inherit; text-decoration: none; }
     height: 100vh;
     border-radius: 0 !important;
   }
+
+  /* Detail modal: stack poster above the info so the action buttons wrap across
+     the full width instead of being crammed one-per-row into the narrow column
+     beside the poster (worst on TV shows, which have the most buttons). */
+  .modal-hero {
+    flex-direction: column !important;
+    align-items: center;
+    gap: 14px !important;
+  }
+  .modal-poster {
+    width: 120px !important;
+    height: 180px !important;
+  }
+  .modal-info {
+    width: 100%;
+    padding-top: 0 !important;
+  }
+  .modal-actions { justify-content: center; }
 }
