@@ -15,27 +15,30 @@ const SEASON_BTN: Record<string, { bg: string; color: string; label: string; mob
   available:  { bg: "var(--green)",    color: "#000",        label: "✓ Available",    mobile: "✓" },
 };
 
-function SeenBtn({ watched, partial, state, onMark, onUnmark, small }: {
+function SeenBtn({ watched, partial, state, onMark, onUnmark, small, mobile }: {
   watched: boolean; partial?: boolean; state: WatchState;
-  onMark: () => void; onUnmark: () => void; small?: boolean;
+  onMark: () => void; onUnmark: () => void; small?: boolean; mobile?: boolean;
 }) {
   const bg = state === "error" ? "var(--red)"
     : watched ? "var(--green)"
     : partial ? "var(--yellow)"
     : "var(--surface2)";
   const color = (watched || partial) ? "#000" : "var(--text)";
+  // Compact to an icon on phones so the row's buttons don't overflow the card
+  // (the partial "▶ Watching" was the widest and got clipped).
   const label = state === "loading" ? "…"
-    : state === "error" ? "Error"
-    : watched ? "✓ Seen"
-    : partial ? "▶ Watching"
-    : "Mark Seen";
+    : state === "error" ? (mobile ? "✕" : "Error")
+    : watched ? (mobile ? "✓" : "✓ Seen")
+    : partial ? (mobile ? "▶" : "▶ Watching")
+    : (mobile ? "Seen" : "Mark Seen");
 
   return (
     <button
       onClick={e => { e.stopPropagation(); watched ? onUnmark() : onMark(); }}
       disabled={state === "loading"}
+      title={watched ? "Seen — tap to undo" : partial ? "Watching — tap to mark the season seen" : "Mark the season seen"}
       style={{
-        padding: small ? "3px 10px" : "5px 14px",
+        padding: mobile ? "5px 9px" : small ? "3px 10px" : "5px 14px",
         borderRadius: 20, border: "1px solid var(--border)",
         cursor: state === "loading" ? "wait" : "pointer",
         fontWeight: 600, fontSize: small ? 11 : 12, whiteSpace: "nowrap", flexShrink: 0,
@@ -305,9 +308,9 @@ export default function SeasonRow({ season, tmdbId, showTitle, autoExpand = fals
             style={{ width: 44, height: 66, objectFit: "cover", borderRadius: 6, flexShrink: 0 }}
             onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} />
         )}
-        <div style={{ flex: 1 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontWeight: 600, fontSize: 14 }}>{season.name}</div>
-          <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2, display: "flex", gap: 8, alignItems: "center" }}>
+          <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             <span>{season.episode_count} episodes{season.air_date ? ` · ${season.air_date.slice(0, 4)}` : ""}</span>
             {progress && progress.watched > 0 && (
               <span style={{
@@ -383,7 +386,7 @@ export default function SeasonRow({ season, tmdbId, showTitle, autoExpand = fals
               </>
             );
           })()}
-          <SeenBtn watched={isFullyWatched} partial={!!isPartial} state={state} onMark={markSeason} onUnmark={unmarkSeason} />
+          <SeenBtn watched={isFullyWatched} partial={!!isPartial} state={state} onMark={markSeason} onUnmark={unmarkSeason} mobile={isMobile} />
           <span style={{ color: "var(--muted)", fontSize: 14, userSelect: "none" }}>
             {expanded ? "▲" : "▼"}
           </span>
