@@ -55,7 +55,7 @@ async def get_details(tmdb_id: int, media_type: str) -> dict:
     async with httpx.AsyncClient() as client:
         r = await client.get(
             f"{BASE}/{media_type}/{tmdb_id}",
-            params=_params(append_to_response="credits,keywords"),
+            params=_params(append_to_response="credits,keywords,external_ids"),
         )
         r.raise_for_status()
         return r.json()

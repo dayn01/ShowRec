@@ -1,11 +1,11 @@
 """
-TVmaze integration — accurate episode air dates/times. Free, no API key.
+TVmaze integration — accurate episode air dates. Free, no API key.
 
 Why this exists: TMDB stores an episode `air_date` as a bare date with no time,
 and for streamers (notably Apple TV+, which drops at 9pm US-Pacific the evening
 before) that date is the US-Pacific date — a day behind the rest of the world.
-TVmaze exposes a full `airstamp` (date + time + offset), so we use it to correct
-the air date for the viewer's timezone. Falls back silently when a show isn't found.
+TVmaze exposes a full `airstamp` (date + time + offset), so we use it to derive
+the air date in the viewer's timezone. Falls back silently when a show isn't found.
 """
 import datetime
 import logging
@@ -14,6 +14,24 @@ import httpx
 
 logger = logging.getLogger(__name__)
 BASE = "https://api.tvmaze.com"
+
+
+def _to_local_date(airstamp: str | None) -> str | None:
+    """A TVmaze airstamp (ISO, usually UTC) -> YYYY-MM-DD in the configured timezone."""
+    if not airstamp:
+        return None
+    try:
+        dt = datetime.datetime.fromisoformat(airstamp.replace("Z", "+00:00"))
+    except Exception:
+        return None
+    if dt.tzinfo is not None:
+        try:
+            from zoneinfo import ZoneInfo
+            from config import settings
+            dt = dt.astimezone(ZoneInfo(getattr(settings, "timezone", None) or "UTC"))
+        except Exception:
+            pass
+    return dt.date().isoformat()
 
 
 async def _find_show_id(client: httpx.AsyncClient, imdb_id: str | None, name: str | None) -> int | None:
@@ -39,11 +57,12 @@ async def _find_show_id(client: httpx.AsyncClient, imdb_id: str | None, name: st
     return None
 
 
-async def get_upcoming_air_dates(imdb_id: str | None = None, name: str | None = None) -> dict:
+async def get_air_dates(imdb_id: str | None = None, name: str | None = None,
+                        upcoming_only: bool = False) -> dict:
     """
-    Return {(season, number): airstamp} for episodes airing ~today or later.
-    `airstamp` is a full ISO datetime (usually UTC). Empty dict if the show
-    can't be resolved on TVmaze or has no scheduled upcoming episodes.
+    Return {(season, number): 'YYYY-MM-DD'} in the configured local timezone for a
+    show's episodes. `upcoming_only=True` keeps only episodes airing ~today or later.
+    Empty dict if the show can't be resolved on TVmaze.
     """
     if not imdb_id and not name:
         return {}
@@ -68,10 +87,14 @@ async def get_upcoming_air_dates(imdb_id: str | None = None, name: str | None = 
         s, n = e.get("season"), e.get("number")
         if not stamp or s is None or n is None:
             continue
-        try:
-            dt = datetime.datetime.fromisoformat(stamp.replace("Z", "+00:00"))
-        except Exception:
-            continue
-        if dt >= cutoff:
-            out[(s, n)] = stamp
+        if upcoming_only:
+            try:
+                dt = datetime.datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+            except Exception:
+                continue
+            if dt < cutoff:
+                continue
+        ld = _to_local_date(stamp)
+        if ld:
+            out[(s, n)] = ld
     return out

@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from integrations import tmdb, tastedive
+from integrations import tmdb, tastedive, tvmaze
 import asyncio
 import database
 
@@ -49,6 +49,7 @@ def _shape_show(data: dict, media_type: str) -> dict:
         })
     else:
         result.update({
+            "imdb_id": (data.get("external_ids") or {}).get("imdb_id"),
             "first_air_date": data.get("first_air_date"),
             "last_air_date": data.get("last_air_date"),
             "next_episode_to_air": data.get("next_episode_to_air"),
@@ -76,9 +77,34 @@ def _shape_show(data: dict, media_type: str) -> dict:
     return result
 
 
+async def _apply_tvmaze_season_dates(tmdb_id: int, season: dict) -> None:
+    """Overwrite the season's episode air_dates with TVmaze's accurate, local-tz
+    dates (TMDB stores a bare date that's a day early for streamers). Silent no-op
+    if the show can't be matched on TVmaze or isn't cached yet."""
+    try:
+        show = await database.get_show(tmdb_id, "tv")
+        if not show:
+            return
+        imdb_id = show.get("imdb_id")
+        name = show.get("title") or show.get("name")
+        if not imdb_id and not name:
+            return
+        air = await tvmaze.get_air_dates(imdb_id=imdb_id, name=name)
+        if not air:
+            return
+        sn = season.get("season_number")
+        for ep in season.get("episodes", []):
+            ld = air.get((sn, ep.get("episode_number")))
+            if ld:
+                ep["air_date"] = ld
+    except Exception:
+        pass
+
+
 async def _fetch_and_cache_season(tmdb_id: int, season_number: int) -> dict:
     data = await tmdb.get_tv_season(tmdb_id, season_number)
     result = _shape_season(data)
+    await _apply_tvmaze_season_dates(tmdb_id, result)
     await database.set_season(tmdb_id, season_number, result)
     return result
 

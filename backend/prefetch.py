@@ -150,6 +150,20 @@ async def _returning_shows(profile_id: int, dismissed: set[int]) -> list[dict]:
             show = await _fetch_and_cache_show(tmdb_id, "tv")
         if not show:
             continue
+        # Correct the premiere date via TVmaze (TMDB's is date-only / a day early
+        # for streamers), in the configured local timezone.
+        prem = next_ep["air_date"]
+        try:
+            tv_dates = await tvmaze.get_air_dates(
+                imdb_id=show.get("imdb_id"),
+                name=show.get("title") or show.get("name"),
+                upcoming_only=True,
+            )
+            ld = tv_dates.get((next_ep.get("season_number"), next_ep.get("episode_number")))
+            if ld:
+                prem = ld
+        except Exception:
+            pass
         out.append({
             "id": tmdb_id,
             "title": show.get("title") or show.get("name") or info_title or "",
@@ -165,8 +179,8 @@ async def _returning_shows(profile_id: int, dismissed: set[int]) -> list[dict]:
             "genre_component": 0,
             "new_season": True,
             "next_season": next_season,          # structured, for the new-season notifier
-            "premieres": next_ep["air_date"],
-            "reason": f"New season {next_season} — premieres {next_ep['air_date']}",
+            "premieres": prem,
+            "reason": f"New season {next_season} — premieres {prem}",
         })
     return out
 
@@ -537,9 +551,8 @@ async def _build_upcoming(history: list[dict], profile_id: int = 1) -> dict | No
             first_aired = next_ep["air_date"] + "T00:00:00.000Z"
             try:
                 async with sem:
-                    tv_dates = await tvmaze.get_upcoming_air_dates(imdb_id=imdb_id, name=title)
-                stamp = tv_dates.get((next_ep.get("season_number"), next_ep.get("episode_number")))
-                local = _local_air_date(stamp) if stamp else None
+                    tv_dates = await tvmaze.get_air_dates(imdb_id=imdb_id, name=title, upcoming_only=True)
+                local = tv_dates.get((next_ep.get("season_number"), next_ep.get("episode_number")))
                 if local:
                     first_aired = local + "T00:00:00.000Z"
             except Exception:
