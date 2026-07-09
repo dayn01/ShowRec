@@ -92,7 +92,7 @@ async def get_upcoming_episodes_for_show(tmdb_id: int) -> dict | None:
     async with httpx.AsyncClient() as client:
         r = await client.get(
             f"{BASE}/tv/{tmdb_id}",
-            params=_params(append_to_response="next_episode_to_air"),
+            params=_params(append_to_response="next_episode_to_air,external_ids"),
         )
         if r.status_code != 200:
             return None
@@ -102,6 +102,7 @@ async def get_upcoming_episodes_for_show(tmdb_id: int) -> dict | None:
             "show_title": data.get("name"),
             "status": data.get("status"),
             "next_episode": data.get("next_episode_to_air"),
+            "imdb_id": (data.get("external_ids") or {}).get("imdb_id"),
         }
 
 

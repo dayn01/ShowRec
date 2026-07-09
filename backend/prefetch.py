@@ -4,9 +4,10 @@ Runs on startup and every 6 hours via the scheduler.
 """
 import asyncio
 import concurrent.futures
+import datetime
 import logging
 import database
-from integrations import trakt, tmdb, reddit, jellyfin, tastedive
+from integrations import trakt, tmdb, reddit, jellyfin, tastedive, tvmaze
 from integrations.claude import get_ai_recommendations
 from routers.recommendations import _gather_history
 from routers.details import _fetch_and_cache_show, _fetch_and_cache_season, _resolve_tastedive_item
@@ -14,6 +15,25 @@ from constants import GENRE_MAP
 from config import settings
 
 logger = logging.getLogger(__name__)
+
+
+def _local_air_date(airstamp: str | None) -> str | None:
+    """Convert a full ISO air timestamp (usually UTC) to a YYYY-MM-DD calendar
+    date in the configured local timezone. Returns None if it can't be parsed."""
+    if not airstamp:
+        return None
+    try:
+        dt = datetime.datetime.fromisoformat(airstamp.replace("Z", "+00:00"))
+    except Exception:
+        return None
+    if dt.tzinfo is not None:
+        try:
+            from zoneinfo import ZoneInfo
+            tzname = getattr(settings, "timezone", None) or "UTC"
+            dt = dt.astimezone(ZoneInfo(tzname))
+        except Exception:
+            pass
+    return dt.date().isoformat()
 
 async def _build_taste_profile(watched: list[dict]) -> dict:
     """
@@ -447,9 +467,11 @@ async def _build_upcoming(history: list[dict], profile_id: int = 1) -> dict | No
         for entry in calendar:
             ep = entry.get("episode", {})
             show = entry.get("show", {})
+            fa = entry.get("first_aired", "")
+            day = _local_air_date(fa) or (fa[:10] if fa else "")
             episodes.append({
                 "source": "trakt",
-                "first_aired": entry.get("first_aired", ""),
+                "first_aired": (day + "T00:00:00.000Z") if day else fa,
                 "show": show,
                 "episode": ep,
             })
@@ -479,12 +501,14 @@ async def _build_upcoming(history: list[dict], profile_id: int = 1) -> dict | No
         try:
             next_ep = None
             title = ""
+            imdb_id = None
 
             # Check SQLite — but only trust it if next_episode_to_air was stored
             cached = await database.get_show(tmdb_id)
             if cached and "next_episode_to_air" in cached:
                 next_ep = cached.get("next_episode_to_air")
                 title = cached.get("title") or cached.get("name", "")
+                imdb_id = cached.get("imdb_id")
             else:
                 # Fetch fresh from TMDB (bounded) and update the cache
                 async with sem:
@@ -493,9 +517,12 @@ async def _build_upcoming(history: list[dict], profile_id: int = 1) -> dict | No
                     return
                 next_ep = data.get("next_episode")
                 title = data.get("show_title", "")
-                # Re-cache the show with next_episode_to_air included
+                imdb_id = data.get("imdb_id")
+                # Re-cache the show with next_episode_to_air + imdb_id included
                 if cached:
                     cached["next_episode_to_air"] = next_ep
+                    if imdb_id:
+                        cached["imdb_id"] = imdb_id
                     await database.set_show(tmdb_id, "tv", cached)
 
             if not next_ep or not next_ep.get("air_date"):
@@ -504,9 +531,23 @@ async def _build_upcoming(history: list[dict], profile_id: int = 1) -> dict | No
             if tmdb_id in trakt_show_tmdb_ids:
                 return
 
+            # TMDB's air_date is date-only and often a day behind for streamers
+            # (e.g. Apple TV+ stores the US-Pacific date). Correct it from TVmaze's
+            # real airstamp for the same episode, in the configured local timezone.
+            first_aired = next_ep["air_date"] + "T00:00:00.000Z"
+            try:
+                async with sem:
+                    tv_dates = await tvmaze.get_upcoming_air_dates(imdb_id=imdb_id, name=title)
+                stamp = tv_dates.get((next_ep.get("season_number"), next_ep.get("episode_number")))
+                local = _local_air_date(stamp) if stamp else None
+                if local:
+                    first_aired = local + "T00:00:00.000Z"
+            except Exception:
+                pass
+
             episodes.append({
                 "source": "tmdb",
-                "first_aired": next_ep["air_date"] + "T00:00:00.000Z",
+                "first_aired": first_aired,
                 "show": {"title": title, "ids": {"tmdb": tmdb_id}},
                 "episode": {
                     "title": next_ep.get("name", ""),
