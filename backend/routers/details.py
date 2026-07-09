@@ -7,9 +7,30 @@ import database
 router = APIRouter(prefix="/details", tags=["details"])
 
 
+async def _correct_next_episode_date(show: dict) -> None:
+    """Correct the show's next_episode_to_air.air_date via TVmaze (local tz) — this
+    feeds the season header's 'E# <when>' badge. Silent no-op if unmatched."""
+    try:
+        ne = show.get("next_episode_to_air")
+        if not ne or not ne.get("air_date"):
+            return
+        imdb_id = show.get("imdb_id")
+        name = show.get("title") or show.get("name")
+        if not imdb_id and not name:
+            return
+        air = await tvmaze.get_air_dates(imdb_id=imdb_id, name=name, upcoming_only=True)
+        ld = air.get((ne.get("season_number"), ne.get("episode_number")))
+        if ld:
+            ne["air_date"] = ld
+    except Exception:
+        pass
+
+
 async def _fetch_and_cache_show(tmdb_id: int, media_type: str) -> dict:
     data = await tmdb.get_details(tmdb_id, media_type)
     result = _shape_show(data, media_type)
+    if media_type == "tv":
+        await _correct_next_episode_date(result)
     await database.set_show(tmdb_id, media_type, result)
     return result
 

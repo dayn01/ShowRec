@@ -516,6 +516,7 @@ async def _build_upcoming(history: list[dict], profile_id: int = 1) -> dict | No
             next_ep = None
             title = ""
             imdb_id = None
+            from_fresh = False
 
             # Check SQLite — but only trust it if next_episode_to_air was stored
             cached = await database.get_show(tmdb_id)
@@ -524,7 +525,7 @@ async def _build_upcoming(history: list[dict], profile_id: int = 1) -> dict | No
                 title = cached.get("title") or cached.get("name", "")
                 imdb_id = cached.get("imdb_id")
             else:
-                # Fetch fresh from TMDB (bounded) and update the cache
+                # Fetch fresh from TMDB (bounded)
                 async with sem:
                     data = await tmdb.get_upcoming_episodes_for_show(tmdb_id)
                 if not data:
@@ -532,12 +533,7 @@ async def _build_upcoming(history: list[dict], profile_id: int = 1) -> dict | No
                 next_ep = data.get("next_episode")
                 title = data.get("show_title", "")
                 imdb_id = data.get("imdb_id")
-                # Re-cache the show with next_episode_to_air + imdb_id included
-                if cached:
-                    cached["next_episode_to_air"] = next_ep
-                    if imdb_id:
-                        cached["imdb_id"] = imdb_id
-                    await database.set_show(tmdb_id, "tv", cached)
+                from_fresh = True
 
             if not next_ep or not next_ep.get("air_date"):
                 return
@@ -547,16 +543,25 @@ async def _build_upcoming(history: list[dict], profile_id: int = 1) -> dict | No
 
             # TMDB's air_date is date-only and often a day behind for streamers
             # (e.g. Apple TV+ stores the US-Pacific date). Correct it from TVmaze's
-            # real airstamp for the same episode, in the configured local timezone.
-            first_aired = next_ep["air_date"] + "T00:00:00.000Z"
+            # real airstamp and bake it into next_ep, so the Upcoming feed AND the
+            # cached next_episode_to_air (the season-header badge) stay in sync.
             try:
                 async with sem:
                     tv_dates = await tvmaze.get_air_dates(imdb_id=imdb_id, name=title, upcoming_only=True)
                 local = tv_dates.get((next_ep.get("season_number"), next_ep.get("episode_number")))
-                if local:
-                    first_aired = local + "T00:00:00.000Z"
+                if local and local != next_ep.get("air_date"):
+                    next_ep = {**next_ep, "air_date": local}
             except Exception:
                 pass
+
+            # Persist the corrected next_episode_to_air + imdb_id on a fresh fetch.
+            if from_fresh and cached:
+                cached["next_episode_to_air"] = next_ep
+                if imdb_id:
+                    cached["imdb_id"] = imdb_id
+                await database.set_show(tmdb_id, "tv", cached)
+
+            first_aired = next_ep["air_date"] + "T00:00:00.000Z"
 
             episodes.append({
                 "source": "tmdb",
