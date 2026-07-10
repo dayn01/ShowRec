@@ -1,8 +1,9 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from integrations import tmdb, tastedive, tvmaze, jellyfin
+from integrations import tmdb, tastedive, tvmaze, jellyfin, plex
 from config import settings
 import asyncio
+import concurrent.futures
 import database
 
 router = APIRouter(prefix="/details", tags=["details"])
@@ -384,19 +385,39 @@ async def get_watch_providers(media_type: str, tmdb_id: int, region: str = "AU")
 
 
 async def _merge_episode_availability(tmdb_id: int, season: dict) -> None:
-    """Merge live per-episode availability from Jellyfin into a season's episodes:
-    sets `available` + `play_url` on episodes present in the library. Done at read
-    time (not cached) so it stays current as new episodes are downloaded."""
+    """Merge live per-episode availability into a season's episodes: sets `available`
+    + `play_url` (a deep-link) on episodes present in Jellyfin and/or Plex, per the
+    configured backend(s). Read time (not cached) so it stays current as episodes
+    download. Jellyfin wins when a show is on both."""
+    urls: dict = {}  # {(season, episode): play_url}
+    # Jellyfin
     try:
-        avail = await jellyfin.get_show_episodes(tmdb_id)
-        base = (settings.jellyfin_url or "").rstrip("/")
-        sn = season.get("season_number")
-        for ep in season.get("episodes", []):
-            iid = avail.get((sn, ep.get("episode_number")))
-            ep["available"] = bool(iid)
-            ep["play_url"] = f"{base}/web/#/details?id={iid}" if (iid and base) else None
+        if settings.jellyfin_url and settings.jellyfin_api_key:
+            base = settings.jellyfin_url.rstrip("/")
+            for k, iid in (await jellyfin.get_show_episodes(tmdb_id)).items():
+                urls[k] = f"{base}/web/#/details?id={iid}"
     except Exception:
         pass
+    # Plex (sync plexapi → threadpool); fills in anything Jellyfin didn't cover
+    try:
+        if settings.plex_url and settings.plex_token:
+            pbase = settings.plex_url.rstrip("/")
+            loop = asyncio.get_event_loop()
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                px = await loop.run_in_executor(pool, plex.get_show_episodes, tmdb_id)
+            for k, (rk, machine) in px.items():
+                if k in urls or not machine:
+                    continue
+                urls[k] = (f"{pbase}/web/index.html#!/server/{machine}"
+                           f"/details?key=%2Flibrary%2Fmetadata%2F{rk}")
+    except Exception:
+        pass
+
+    sn = season.get("season_number")
+    for ep in season.get("episodes", []):
+        pu = urls.get((sn, ep.get("episode_number")))
+        ep["available"] = bool(pu)
+        ep["play_url"] = pu
 
 
 @router.get("/tv/{tmdb_id}/season/{season_number}")

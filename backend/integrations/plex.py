@@ -209,6 +209,41 @@ def get_library_index() -> list[dict]:
     return out
 
 
+def get_show_episodes(tmdb_id: int, token: Optional[str] = None) -> dict:
+    """{(season, episode): (rating_key, machine_id)} for one show's episodes present
+    in Plex — powers per-episode availability + Play deep-links. {} if not found.
+    Mirrors the show-level Plex deep-link logic in routers/library.py."""
+    server = _get_server(token)
+    if not server:
+        return {}
+    try:
+        machine = server.machineIdentifier
+    except Exception:
+        machine = None
+    out: dict = {}
+    for section in server.library.sections():
+        if section.type != "show":
+            continue
+        try:
+            shows = section.all()
+        except Exception:
+            continue
+        for show in shows:
+            try:
+                if _tmdb_from_guids(show) != tmdb_id:
+                    continue
+                for ep in show.episodes():
+                    s = getattr(ep, "parentIndex", None)
+                    n = getattr(ep, "index", None)
+                    rk = getattr(ep, "ratingKey", None)
+                    if s is not None and n is not None and rk:
+                        out[(int(s), int(n))] = (str(rk), machine)
+                return out  # matched the show; stop scanning
+            except Exception:
+                continue
+    return out
+
+
 def ping() -> bool:
     try:
         server = _get_server()
