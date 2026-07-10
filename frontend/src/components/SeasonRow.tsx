@@ -110,6 +110,18 @@ function EpisodeRow({ ep, tmdbId, showTitle, seasonNumber, totalEpisodes }: {
           {!isUpcoming && score && <span style={{ fontSize: 11, color: scoreColor, flexShrink: 0 }}>{score}%</span>}
           {ep.runtime && <span style={{ fontSize: 11, color: "var(--muted)", flexShrink: 0 }}>{ep.runtime}m</span>}
           {ep.air_date && !isUpcoming && <span style={{ fontSize: 11, color: "var(--muted)", flexShrink: 0 }}>{ep.air_date}</span>}
+          {ep.available && (
+            <span style={{ fontSize: 10, fontWeight: 700, color: "var(--green)", flexShrink: 0 }}
+              title="Available in your library">● On server</span>
+          )}
+          {ep.available && ep.play_url && (
+            <a href={ep.play_url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}
+              title="Play in Jellyfin"
+              style={{
+                fontSize: 10, fontWeight: 700, color: "#000", background: "var(--green)",
+                borderRadius: 10, padding: "1px 8px", flexShrink: 0, textDecoration: "none",
+              }}>▶ Play</a>
+          )}
         </div>
         {ep.overview && (
           <div style={{

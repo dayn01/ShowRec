@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from integrations import tmdb, tastedive, tvmaze
+from integrations import tmdb, tastedive, tvmaze, jellyfin
+from config import settings
 import asyncio
 import database
 
@@ -382,15 +383,34 @@ async def get_watch_providers(media_type: str, tmdb_id: int, region: str = "AU")
     return {"region": region, "available_regions": sorted(all_regions.keys()), **_shape_providers(region_data)}
 
 
+async def _merge_episode_availability(tmdb_id: int, season: dict) -> None:
+    """Merge live per-episode availability from Jellyfin into a season's episodes:
+    sets `available` + `play_url` on episodes present in the library. Done at read
+    time (not cached) so it stays current as new episodes are downloaded."""
+    try:
+        avail = await jellyfin.get_show_episodes(tmdb_id)
+        base = (settings.jellyfin_url or "").rstrip("/")
+        sn = season.get("season_number")
+        for ep in season.get("episodes", []):
+            iid = avail.get((sn, ep.get("episode_number")))
+            ep["available"] = bool(iid)
+            ep["play_url"] = f"{base}/web/#/details?id={iid}" if (iid and base) else None
+    except Exception:
+        pass
+
+
 @router.get("/tv/{tmdb_id}/season/{season_number}")
 async def get_season_episodes(tmdb_id: int, season_number: int):
     cached = await database.get_season(tmdb_id, season_number)
     if cached:
-        return cached
-    try:
-        return await _fetch_and_cache_season(tmdb_id, season_number)
-    except Exception as e:
-        raise HTTPException(502, f"TMDB error: {e}")
+        season = cached
+    else:
+        try:
+            season = await _fetch_and_cache_season(tmdb_id, season_number)
+        except Exception as e:
+            raise HTTPException(502, f"TMDB error: {e}")
+    await _merge_episode_availability(tmdb_id, season)
+    return season
 
 
 @router.post("/tv/{tmdb_id}/prefetch-seasons")

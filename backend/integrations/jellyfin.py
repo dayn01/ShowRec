@@ -1,4 +1,5 @@
 """Jellyfin API client — watch history and library browsing."""
+import time
 import httpx
 from typing import Optional
 from config import settings
@@ -192,6 +193,51 @@ async def get_episode_availability(user_id: str | None = None) -> dict:
         tid = series_tmdb.get(sid)
         if tid:
             out[tid] = list(info["max"])
+    return out
+
+
+_series_id_cache: dict = {"at": 0.0, "map": {}}
+
+
+async def _tmdb_to_series_id() -> dict:
+    """Cached {tmdb_id: jellyfin_series_item_id} from the library index (10-min TTL)
+    so per-show availability lookups don't re-scan the whole library each time."""
+    if _series_id_cache["map"] and (time.time() - _series_id_cache["at"] < 600):
+        return _series_id_cache["map"]
+    index = await get_library_index()
+    m = {e["tmdb_id"]: e["item_id"] for e in index if e.get("media_type") == "tv"}
+    _series_id_cache["at"] = time.time()
+    _series_id_cache["map"] = m
+    return m
+
+
+async def get_show_episodes(tmdb_id: int, user_id: str | None = None) -> dict:
+    """{(season, episode): jellyfin_item_id} for one show's episodes present in the
+    library — powers the per-episode 'on the box' + Play markers. {} if not found."""
+    user_id = user_id or settings.jellyfin_user_id
+    if not (settings.jellyfin_url and settings.jellyfin_api_key and user_id):
+        return {}
+    series_id = (await _tmdb_to_series_id()).get(tmdb_id)
+    if not series_id:
+        return {}
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.get(
+                f"{_base()}/Users/{user_id}/Items", headers=_headers(), params={
+                    "ParentId": series_id, "IncludeItemTypes": "Episode",
+                    "Recursive": "true", "Fields": "ParentIndexNumber,IndexNumber",
+                    "Limit": 5000,
+                })
+            if r.status_code != 200:
+                return {}
+            eps = r.json().get("Items", [])
+    except Exception:
+        return {}
+    out: dict = {}
+    for e in eps:
+        s, n, iid = e.get("ParentIndexNumber"), e.get("IndexNumber"), e.get("Id")
+        if s is not None and n is not None and iid:
+            out[(s, n)] = iid
     return out
 
 
