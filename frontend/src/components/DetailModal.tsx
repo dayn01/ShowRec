@@ -182,6 +182,17 @@ export default function DetailModal({ tmdbId, mediaType, onClose }: Props) {
     try {
       await api.requestMedia(data.id, data.media_type, seasons);
       setReqState("done");
+      // Optimistically flip the cached statuses so the card badge + per-show status
+      // read "Downloading" the instant you return — before Jellyseerr finishes
+      // propagating — then invalidate to reconcile with the real state. Without
+      // this the badge lags (up to staleTime) and you re-request a duplicate.
+      const tid = String(data.id);
+      queryClient.setQueryData(["request-statuses"], (old: any) =>
+        old?.statuses ? { ...old, statuses: { ...old.statuses, [tid]: "processing" } } : old);
+      queryClient.setQueryData(["request-status", current.mediaType, current.tmdbId], (old: any) =>
+        old ? { ...old, status: "processing", requested: true } : old);
+      queryClient.invalidateQueries({ queryKey: ["request-status", current.mediaType, current.tmdbId] });
+      queryClient.invalidateQueries({ queryKey: ["request-statuses"] });
     } catch {
       setReqState("error");
       setTimeout(() => setReqState("idle"), 3000);

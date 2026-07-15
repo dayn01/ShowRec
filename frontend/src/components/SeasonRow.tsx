@@ -209,6 +209,17 @@ export default function SeasonRow({ season, tmdbId, showTitle, autoExpand = fals
     try {
       await api.requestMedia(tmdbId, "tv", [season.season_number]);
       setReqState("done");
+      // Optimistically flip the cached statuses so this season (and the card badge)
+      // read "Downloading" instantly — surviving a remount — before Jellyseerr
+      // propagates, then invalidate to reconcile. Mirrors cancelSeason(); without
+      // it the season snaps back to "Request" on reopen and you re-request.
+      const sk = String(season.season_number);
+      queryClient.setQueryData(["request-status", "tv", tmdbId], (old: any) =>
+        old ? { ...old, seasons: { ...(old.seasons || {}), [sk]: "processing" } } : old);
+      queryClient.setQueryData(["request-statuses"], (old: any) =>
+        old?.statuses ? { ...old, statuses: { ...old.statuses, [String(tmdbId)]: "processing" } } : old);
+      queryClient.invalidateQueries({ queryKey: ["request-status", "tv", tmdbId] });
+      queryClient.invalidateQueries({ queryKey: ["request-statuses"] });
     } catch {
       setReqState("error");
       setTimeout(() => setReqState("idle"), 2500);
