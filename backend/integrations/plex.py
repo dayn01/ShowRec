@@ -179,7 +179,9 @@ def get_watched_movies(token: Optional[str] = None) -> list[dict]:
 
 def get_library_index() -> list[dict]:
     """Every movie + show in the library mapped to its TMDB id, ratingKey and the
-    server's machine id (for play deep-links): [{tmdb_id, media_type, rating_key, machine}]."""
+    server's machine id (for play deep-links):
+    [{tmdb_id, media_type, rating_key, machine, added}]. `added` is the Unix epoch
+    the item entered the library (0 if unknown), for "recently added" sorting."""
     server = _get_server()
     if not server:
         return []
@@ -202,8 +204,13 @@ def get_library_index() -> list[dict]:
                 tmdb_id = _tmdb_from_guids(it)
                 rk = getattr(it, "ratingKey", None)
                 if tmdb_id and rk:
+                    added = getattr(it, "addedAt", None)
+                    try:
+                        added = int(added.timestamp()) if added else 0
+                    except Exception:
+                        added = 0
                     out.append({"tmdb_id": tmdb_id, "media_type": mt,
-                                "rating_key": str(rk), "machine": machine})
+                                "rating_key": str(rk), "machine": machine, "added": added})
             except Exception:
                 continue
     return out

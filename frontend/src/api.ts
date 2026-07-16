@@ -67,6 +67,7 @@ export interface Recommendation {
   reason?: string;        // AI explanation, when AI-endorsed
   ai_endorsed?: boolean;
   new_season?: boolean;   // resurfaced watched show with a new season available
+  added?: number;         // Library: Unix epoch the item entered the Jellyfin/Plex library
 }
 
 export interface NextUpEpisode {

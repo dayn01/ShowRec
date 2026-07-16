@@ -1,8 +1,21 @@
 """Jellyfin API client — watch history and library browsing."""
 import time
 import httpx
+from datetime import datetime
 from typing import Optional
 from config import settings
+
+
+def _epoch(iso: str | None) -> int:
+    """Jellyfin's DateCreated ("2024-01-15T10:30:00.0000000Z") → Unix epoch, for
+    sortable "recently added" ordering. Drops fractional seconds/tz (all items come
+    from the same server, so relative order is what matters). 0 when unparseable."""
+    if not iso:
+        return 0
+    try:
+        return int(datetime.strptime(iso[:19], "%Y-%m-%dT%H:%M:%S").timestamp())
+    except Exception:
+        return 0
 
 
 def _base() -> str:
@@ -129,7 +142,8 @@ async def get_watched_movies(user_id: str | None = None) -> list[dict]:
 
 async def get_library_index() -> list[dict]:
     """Every movie + series in the library mapped to its TMDB id and Jellyfin item
-    id (for play deep-links): [{tmdb_id, media_type, item_id}, ...]."""
+    id (for play deep-links): [{tmdb_id, media_type, item_id, added}, ...].
+    `added` is the Unix epoch it entered the library (0 if unknown)."""
     if not settings.jellyfin_url or not settings.jellyfin_api_key:
         return []
     user_id = settings.jellyfin_user_id
@@ -140,7 +154,7 @@ async def get_library_index() -> list[dict]:
             try:
                 r = await client.get(base, headers=_headers(), params={
                     "IncludeItemTypes": item_type, "Recursive": "true",
-                    "Fields": "ProviderIds", "Limit": 10000,
+                    "Fields": "ProviderIds,DateCreated", "Limit": 10000,
                 })
                 if r.status_code != 200:
                     continue
@@ -148,7 +162,8 @@ async def get_library_index() -> list[dict]:
                     pid = it.get("ProviderIds", {})
                     tmdb = pid.get("Tmdb") or pid.get("tmdb")
                     if tmdb and it.get("Id"):
-                        out.append({"tmdb_id": int(tmdb), "media_type": mt, "item_id": it["Id"]})
+                        out.append({"tmdb_id": int(tmdb), "media_type": mt, "item_id": it["Id"],
+                                    "added": _epoch(it.get("DateCreated"))})
             except Exception:
                 continue
     return out

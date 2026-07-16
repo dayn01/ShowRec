@@ -5,8 +5,8 @@ import DetailModal from "../components/DetailModal";
 import { GenreFilter, applyGenreFilter } from "../components/GenreFilter";
 import { SortControl, sortRecommendations } from "../components/SortControl";
 
-// The library has no meaningful "added" order, so offer the generic sorts only.
 const SORTS = [
+  { id: "added", label: "Recently added" },
   { id: "title", label: "Title A–Z" },
   { id: "rating", label: "Rating" },
   { id: "release", label: "Release year" },
@@ -18,7 +18,7 @@ export default function Library() {
   const [selected, setSelected] = useState<{ id: number; mediaType: string } | null>(null);
   const [genreFilter, setGenreFilter] = useState<string[]>([]);
   const [typeFilter, setTypeFilter] = useState<"all" | "tv" | "movie">("all");
-  const [sort, setSort] = useState("title");
+  const [sort, setSort] = useState("added");
 
   useEffect(() => {
     api.getAllLibrary()
@@ -32,7 +32,11 @@ export default function Library() {
   // Narrow to the chosen media type before genre/sort so counts and genre chips
   // reflect only what's on screen.
   const typed = typeFilter === "all" ? items : items.filter(i => i.media_type === typeFilter);
-  const ordered = sortRecommendations(typed, sort);
+  // "added" (newest on the server first) is Library-specific; the rest are the
+  // shared generic sorts. Items with no known added-date sink to the bottom.
+  const ordered = sort === "added"
+    ? [...typed].sort((a, b) => (b.added ?? 0) - (a.added ?? 0))
+    : sortRecommendations(typed, sort);
   const visible = applyGenreFilter(ordered, genreFilter);
 
   if (loading) {

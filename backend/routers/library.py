@@ -196,16 +196,16 @@ async def get_all_library():
     from TMDB with bounded fan-out per call, so a cold library fills in over a few
     loads instead of stalling the request. Cached 1h, like the owned-library map.
     """
-    cached = await database.cache_get("library_all", "owned")
+    cached = await database.cache_get("library_all_v2", "owned")
     if cached is not None:
         return {"items": cached}
 
-    # 1) Collect the library index (tmdb_id → media_type). Jellyfin wins a tie so a
-    #    title on both servers isn't listed twice / with the wrong type.
-    index: dict[str, str] = {}
+    # 1) Collect the library index → {tmdb_id: (media_type, added_epoch)}. Jellyfin
+    #    wins a tie so a title on both servers isn't listed twice / with wrong type.
+    index: dict[str, tuple[str, int]] = {}
     try:
         for e in await jellyfin.get_library_index():
-            index[str(e["tmdb_id"])] = e["media_type"]
+            index[str(e["tmdb_id"])] = (e["media_type"], e.get("added", 0))
     except Exception:
         pass
     if settings.plex_url and settings.plex_token:
@@ -214,7 +214,7 @@ async def get_all_library():
             with concurrent.futures.ThreadPoolExecutor() as pool:
                 plex_items = await loop.run_in_executor(pool, plex.get_library_index)
             for e in plex_items:
-                index.setdefault(str(e["tmdb_id"]), e["media_type"])
+                index.setdefault(str(e["tmdb_id"]), (e["media_type"], e.get("added", 0)))
         except Exception:
             pass
 
@@ -226,7 +226,7 @@ async def get_all_library():
     # 2) Enrich from cache; warm a bounded batch of cache-misses from TMDB so the
     #    genre filter has data to work with. Concurrency-limited to be gentle.
     cache = await database.get_shows_bulk(ids)
-    missing = [(int(t), mt) for t, mt in index.items() if int(t) not in cache][:400]
+    missing = [(int(t), mt) for t, (mt, _a) in index.items() if int(t) not in cache][:400]
     if missing:
         from routers.details import _fetch_and_cache_show
         sem = asyncio.Semaphore(8)
@@ -245,7 +245,7 @@ async def get_all_library():
     #    the library); metadata from the cache. Titles not yet cached are skipped and
     #    fill in on a later load once the warmer catches them.
     items = []
-    for t, mt in index.items():
+    for t, (mt, added) in index.items():
         c = cache.get(int(t))
         if not c:
             continue
@@ -260,9 +260,10 @@ async def get_all_library():
             "genre_ids": c.get("genre_ids", []),
             "release_date": c.get("release_date"),
             "first_air_date": c.get("first_air_date"),
+            "added": added,
         })
 
-    await database.cache_set("library_all", items)
+    await database.cache_set("library_all_v2", items)
     return {"items": items}
 
 
