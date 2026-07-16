@@ -5,6 +5,7 @@ import Upcoming from "./pages/Upcoming";
 import Watching from "./pages/Watching";
 import Watched from "./pages/Watched";
 import Watchlist from "./pages/Watchlist";
+import Library from "./pages/Library";
 import Stats from "./pages/Stats";
 import Search from "./pages/Search";
 import StatusBar from "./components/StatusBar";
@@ -16,6 +17,7 @@ const NAV = [
   { to: "/", label: "Recommendations", end: true },
   { to: "/watching", label: "Watching" },
   { to: "/watchlist", label: "Watchlist" },
+  { to: "/library", label: "Library" },
   { to: "/watched", label: "Watched" },
   { to: "/upcoming", label: "Upcoming" },
   { to: "/stats", label: "Stats" },
@@ -146,6 +148,7 @@ export default function App() {
           <Route path="/watching" element={<Watching />} />
           <Route path="/watched" element={<Watched />} />
           <Route path="/watchlist" element={<Watchlist />} />
+          <Route path="/library" element={<Library />} />
           <Route path="/upcoming" element={<Upcoming />} />
           <Route path="/stats" element={<Stats />} />
           <Route path="/search" element={<Search />} />

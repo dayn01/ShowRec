@@ -206,6 +206,7 @@ export const api = {
     get<WatchProviders>(`/details/${mediaType}/${tmdbId}/watch-providers?region=${encodeURIComponent(region)}`),
   getOwnedLibrary: () =>
     get<{ items: Record<string, { source: string; url: string | null }> }>(`/library/owned`),
+  getAllLibrary: () => get<{ items: Recommendation[] }>(`/library/all`),
   getRequestStatus: (mediaType: string, tmdbId: number) =>
     get<RequestStatus>(`/request/status/${mediaType}/${tmdbId}`),
   getRequestStatuses: () =>

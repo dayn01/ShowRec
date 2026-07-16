@@ -184,6 +184,88 @@ async def get_owned_library():
     return {"items": items}
 
 
+# ── Full library (for the Library tab) ────────────────────────────────────────
+
+@router.get("/library/all")
+async def get_all_library():
+    """Full media cards for everything in the connected Jellyfin/Plex library —
+    powers the Library tab (type filter / genre / sort).
+
+    The library index only carries {tmdb_id, media_type}; titles, posters and
+    genre_ids come from the show cache (one bulk read). Uncached titles are warmed
+    from TMDB with bounded fan-out per call, so a cold library fills in over a few
+    loads instead of stalling the request. Cached 1h, like the owned-library map.
+    """
+    cached = await database.cache_get("library_all", "owned")
+    if cached is not None:
+        return {"items": cached}
+
+    # 1) Collect the library index (tmdb_id → media_type). Jellyfin wins a tie so a
+    #    title on both servers isn't listed twice / with the wrong type.
+    index: dict[str, str] = {}
+    try:
+        for e in await jellyfin.get_library_index():
+            index[str(e["tmdb_id"])] = e["media_type"]
+    except Exception:
+        pass
+    if settings.plex_url and settings.plex_token:
+        try:
+            loop = asyncio.get_event_loop()
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                plex_items = await loop.run_in_executor(pool, plex.get_library_index)
+            for e in plex_items:
+                index.setdefault(str(e["tmdb_id"]), e["media_type"])
+        except Exception:
+            pass
+
+    if not index:
+        return {"items": []}
+
+    ids = [int(t) for t in index]
+
+    # 2) Enrich from cache; warm a bounded batch of cache-misses from TMDB so the
+    #    genre filter has data to work with. Concurrency-limited to be gentle.
+    cache = await database.get_shows_bulk(ids)
+    missing = [(int(t), mt) for t, mt in index.items() if int(t) not in cache][:400]
+    if missing:
+        from routers.details import _fetch_and_cache_show
+        sem = asyncio.Semaphore(8)
+
+        async def warm(tmdb_id: int, media_type: str):
+            async with sem:
+                try:
+                    await _fetch_and_cache_show(tmdb_id, media_type)
+                except Exception:
+                    pass
+
+        await asyncio.gather(*[warm(t, mt) for t, mt in missing])
+        cache = await database.get_shows_bulk(ids)
+
+    # 3) Shape MediaCard objects. media_type comes from the index (authoritative for
+    #    the library); metadata from the cache. Titles not yet cached are skipped and
+    #    fill in on a later load once the warmer catches them.
+    items = []
+    for t, mt in index.items():
+        c = cache.get(int(t))
+        if not c:
+            continue
+        items.append({
+            "id": int(t),
+            "media_type": mt,
+            "title": c.get("title") or c.get("name") or "Unknown",
+            "name": c.get("name"),
+            "poster_url": c.get("poster_url"),
+            "overview": c.get("overview", ""),
+            "vote_average": c.get("vote_average", 0),
+            "genre_ids": c.get("genre_ids", []),
+            "release_date": c.get("release_date"),
+            "first_air_date": c.get("first_air_date"),
+        })
+
+    await database.cache_set("library_all", items)
+    return {"items": items}
+
+
 # ── Watchlist ─────────────────────────────────────────────────────────────────
 
 class WatchlistItem(BaseModel):
