@@ -197,6 +197,17 @@ export default function Dashboard() {
   // Reset the visible count when the For You filters change
   useEffect(() => { setForYouVisible(24); }, [forYouType, genreFilter, tab]);
 
+  // Trending paginates on the server and then hides anything you've already
+  // watched / watchlisted / dismissed, which can leave the first page sparse
+  // (e.g. 9 of 20). Auto-load further pages until the grid is full (~20 visible)
+  // or the server pool runs out, so the gaps are back-filled transparently.
+  const isTrending = tab === "trending-shows" || tab === "trending-movies";
+  useEffect(() => {
+    if (!isTrending) return;
+    if (active.loading || active.loadingMore || !active.hasMore) return;
+    if (filteredItems.length < 20) active.loadMore();
+  }, [isTrending, active.loading, active.loadingMore, active.hasMore, filteredItems.length]);
+
   return (
     <div>
       {/* Main tabs */}
